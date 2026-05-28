@@ -1,0 +1,38 @@
+# ── Dependencies ────────────────────────────────
+node_modules/
+.pnp
+.pnp.js
+
+# ── Build outputs ────────────────────────────────
+dist/
+build/
+cdk.out/
+
+# ── Environment variables ────────────────────────
+.env
+.env.local
+.env.*.local
+
+# ── CDK ─────────────────────────────────────────
+cdk.context.json
+
+# ── Python ──────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+.pytest_cache/
+
+# ── OS ──────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── Editor ──────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+
+# ── Logs ────────────────────────────────────────
+*.log
+npm-debug.log*
