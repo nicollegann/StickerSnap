@@ -46,8 +46,6 @@ export function SceneBackground() {
           background-size: 1000px;
           background-position: center;
           background-repeat: no-repeat;
-          /* The PNG has a black bg — multiply blends it away, leaving only the shapes */
-          mix-blend-mode: multiply;
           opacity: 1;
           pointer-events: none;
         }
