@@ -4,15 +4,17 @@ Turn a photo into a sticker from a mobile-friendly PWA. The app resizes the imag
 
 ## Table of Contents
 
-- [Architecture](#architecture)
-- [Repository Layout](#repository-layout)
-- [Prerequisites](#prerequisites)
-- [Local Development](#local-development)
-- [AWS Deployment](#aws-deployment)
-- [CORS Notes](#cors-notes)
-- [Environment Variables](#environment-variables)
-- [Testing](#testing)
-- [Sensitive Information Checklist](#sensitive-information-checklist)
+- [StickerSnap](#stickersnap)
+  - [Table of Contents](#table-of-contents)
+  - [Architecture](#architecture)
+  - [Repository Layout](#repository-layout)
+  - [Prerequisites](#prerequisites)
+  - [Local Development](#local-development)
+  - [AWS Deployment](#aws-deployment)
+  - [CORS Notes](#cors-notes)
+  - [Environment Variables](#environment-variables)
+  - [Testing](#testing)
+  - [Sensitive Information Checklist](#sensitive-information-checklist)
 
 ## Architecture
 
@@ -56,7 +58,7 @@ Browser PWA
 │   │   ├── components/             # Upload, processing, result, and error screens
 │   │   ├── hooks/
 │   │   │   ├── useUpload.ts        # Resize, presign, S3 upload, process request
-│   │   │   └── useShare.ts         # Save, clipboard, Web Share, Telegram, WhatsApp
+│   │   │   └── useShare.ts         # Save, clipboard, Web Share
 │   │   ├── utils/imageUtils.ts     # Validation, UUID, canvas resize
 │   │   └── styles/globals.css
 │   ├── public/manifest.json
@@ -191,25 +193,25 @@ For local dev against the dev bucket, S3 CORS should include `http://localhost:5
 
 Frontend:
 
-| Variable | Used by | Description |
-| --- | --- | --- |
+| Variable          | Used by  | Description                                               |
+| ----------------- | -------- | --------------------------------------------------------- |
 | `VITE_LAMBDA_URL` | Vite app | Lambda Function URL or `/lambda` for the local Vite proxy |
 
 Lambda:
 
-| Variable | Default | Description |
-| --- | --- | --- |
-| `BUCKET_NAME` | required | Assets bucket containing both `uploads/` and `outputs/` |
-| `UPLOADS_PREFIX` | `uploads/` | Accepted upload key prefix |
-| `OUTPUTS_PREFIX` | `outputs/` | Generated sticker key prefix |
-| `PRESIGNED_URL_EXPIRY_SECONDS` | `3600` | Presigned output download URL lifetime |
-| `BORDER_SIZE_PX` | `12` | White sticker border size |
-| `MAX_IMAGE_DIMENSION_PX` | `1024` | Lambda-side longest-edge resize cap |
-| `ALLOWED_ORIGIN` | `http://localhost:5173` | Used by the handler's manual `OPTIONS` response |
-| `NUMBA_CACHE_DIR` | `/tmp/numba_cache` | Writable cache location for Lambda |
-| `U2NET_HOME` | `/tmp/u2net` | REMBG model cache location |
-| `XDG_CACHE_HOME` | `/tmp/cache` | General cache location |
-| `HOME` | `/tmp` | Avoids writes to Lambda's read-only home directory |
+| Variable                       | Default                 | Description                                             |
+| ------------------------------ | ----------------------- | ------------------------------------------------------- |
+| `BUCKET_NAME`                  | required                | Assets bucket containing both `uploads/` and `outputs/` |
+| `UPLOADS_PREFIX`               | `uploads/`              | Accepted upload key prefix                              |
+| `OUTPUTS_PREFIX`               | `outputs/`              | Generated sticker key prefix                            |
+| `PRESIGNED_URL_EXPIRY_SECONDS` | `3600`                  | Presigned output download URL lifetime                  |
+| `BORDER_SIZE_PX`               | `12`                    | White sticker border size                               |
+| `MAX_IMAGE_DIMENSION_PX`       | `1024`                  | Lambda-side longest-edge resize cap                     |
+| `ALLOWED_ORIGIN`               | `http://localhost:5173` | Used by the handler's manual `OPTIONS` response         |
+| `NUMBA_CACHE_DIR`              | `/tmp/numba_cache`      | Writable cache location for Lambda                      |
+| `U2NET_HOME`                   | `/tmp/u2net`            | REMBG model cache location                              |
+| `XDG_CACHE_HOME`               | `/tmp/cache`            | General cache location                                  |
+| `HOME`                         | `/tmp`                  | Avoids writes to Lambda's read-only home directory      |
 
 ## Testing
 
