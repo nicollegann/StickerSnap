@@ -1,0 +1,36 @@
+.footer {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 12px 0 16px;
+  position: relative;
+  z-index: 1;
+  margin-top: auto;
+  flex-shrink: 0;
+}
+
+.text {
+  font-size: 12px;
+  color: var(--color-ink-secondary);
+  letter-spacing: 0.01em;
+}
+
+.link {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-ink-secondary);
+  text-decoration: none;
+  transition: color var(--transition-base);
+}
+
+.link:hover {
+  color: var(--color-accent);
+}
+
+.dot {
+  font-size: 30px;
+  color: var(--color-ink-tertiary);
+  opacity: 0.5;
+}

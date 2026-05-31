@@ -1,6 +1,7 @@
 import { useRef, useState, DragEvent, ChangeEvent } from "react";
 import { SceneBackground } from "./SceneBackground";
 import styles from "./UploadScreen.module.css";
+import { FooterCredit } from "./FooterCredit";
 
 interface UploadScreenProps {
   onFile: (file: File) => void;
@@ -125,6 +126,7 @@ export function UploadScreen({ onFile }: UploadScreenProps) {
           aria-hidden="true"
         />
       </div>
+      <FooterCredit />
     </>
   );
 }

@@ -1,5 +1,6 @@
 import { SceneBackground } from "./SceneBackground";
 import styles from "./ErrorScreen.module.css";
+import { FooterCredit } from "./FooterCredit";
 
 interface ErrorScreenProps {
   message: string;
@@ -22,6 +23,7 @@ export function ErrorScreen({ message, onRetry }: ErrorScreenProps) {
           </button>
         </div>
       </div>
+      <FooterCredit />
     </>
   );
 }

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { RiCheckFill, RiLoader4Line, RiCircleLine } from "react-icons/ri";
 import { SceneBackground } from "./SceneBackground";
 import styles from "./ProcessingScreen.module.css";
+import { FooterCredit } from "./FooterCredit";
 
 interface ProcessingScreenProps {
   stage: "resizing" | "uploading" | "processing";
@@ -199,6 +200,7 @@ export function ProcessingScreen({
           </div>
         </div>
       </div>
+      <FooterCredit />
     </>
   );
 }

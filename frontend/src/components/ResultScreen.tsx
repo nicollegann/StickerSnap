@@ -3,6 +3,7 @@ import { useShare, ShareTarget } from "../hooks/useShare";
 import { SceneBackground } from "./SceneBackground";
 import { FaFileDownload, FaCopy, FaShare, FaCheck } from "react-icons/fa";
 import styles from "./ResultScreen.module.css";
+import { FooterCredit } from "./FooterCredit";
 
 interface ResultScreenProps {
   stickerUrl: string;
@@ -122,6 +123,7 @@ export function ResultScreen({
           {limitReached ? "Daily limit reached" : "Make another sticker"}
         </button>
       </div>
+      <FooterCredit />
     </>
   );
 }
