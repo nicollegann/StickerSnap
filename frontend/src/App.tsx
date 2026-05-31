@@ -1,27 +1,30 @@
-import { useUpload } from './hooks/useUpload';
-import { UploadScreen } from './components/UploadScreen';
-import { ProcessingScreen } from './components/ProcessingScreen';
-import { ResultScreen } from './components/ResultScreen';
-import { ErrorScreen } from './components/ErrorScreen';
+import { useUpload } from "./hooks/useUpload";
+import { UploadScreen } from "./components/UploadScreen";
+import { ProcessingScreen } from "./components/ProcessingScreen";
+import { ResultScreen } from "./components/ResultScreen";
+import { ErrorScreen } from "./components/ErrorScreen";
 
 export default function App() {
-  const { state, upload, reset } = useUpload();
+  const { state, upload, reset, complete } = useUpload();
 
   return (
     <div className="app">
       <main className="app__main">
-        {state.status === 'idle' && (
-          <UploadScreen onFile={upload} />
-        )}
+        {state.status === "idle" && <UploadScreen onFile={upload} />}
 
-        {(state.status === 'resizing' || state.status === 'uploading' || state.status === 'processing') && (
+        {(state.status === "resizing" ||
+          state.status === "uploading" ||
+          state.status === "processing" ||
+          state.status === "ready") && (
           <ProcessingScreen
-            stage={state.status}
-            progress={state.status === 'uploading' ? state.progress : undefined}
+            stage={state.status === "ready" ? "processing" : state.status}
+            progress={state.status === "uploading" ? state.progress : undefined}
+            isReady={state.status === "ready"}
+            onComplete={complete}
           />
         )}
 
-        {state.status === 'done' && (
+        {state.status === "done" && (
           <ResultScreen
             stickerUrl={state.stickerUrl}
             remainingToday={state.remainingToday}
@@ -29,11 +32,8 @@ export default function App() {
           />
         )}
 
-        {state.status === 'error' && (
-          <ErrorScreen
-            message={state.message}
-            onRetry={reset}
-          />
+        {state.status === "error" && (
+          <ErrorScreen message={state.message} onRetry={reset} />
         )}
       </main>
 

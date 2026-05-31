@@ -142,9 +142,9 @@ export class StickerSnapStack extends cdk.Stack {
           MAX_IMAGE_DIMENSION_PX: "1024",
           QUOTA_TABLE_NAME: quotaTable.tableName,
           QUOTA_NAMESPACE: "dev",
-          DAILY_DEVICE_LIMIT: "2",
-          DAILY_IP_LIMIT: "3",
-          HOURLY_IP_LIMIT: "2",
+          DAILY_DEVICE_LIMIT: "10", // set to 10 for dev to allow more testing
+          DAILY_IP_LIMIT: "10",
+          HOURLY_IP_LIMIT: "10",
           NUMBA_CACHE_DIR: "/tmp/numba_cache",
           NUMBA_DISABLE_JIT: "0",
           // Redirect all model/cache dirs to /tmp — the only writable dir in Lambda

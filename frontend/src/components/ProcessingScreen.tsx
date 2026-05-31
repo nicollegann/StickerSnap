@@ -1,29 +1,118 @@
+import { useEffect, useState } from "react";
+import { RiCheckFill, RiLoader4Line, RiCircleLine } from "react-icons/ri";
 import { SceneBackground } from "./SceneBackground";
 
 interface ProcessingScreenProps {
   stage: "resizing" | "uploading" | "processing";
   progress?: number;
+  /** True once the Lambda result is in hand — triggers completion tick sequence */
+  isReady?: boolean;
+  /** Called after all processing steps have ticked to done */
+  onComplete?: () => void;
 }
 
-const STAGE_MESSAGES = {
-  resizing: { title: "Preparing image…", sub: "Optimising for processing" },
-  uploading: { title: "Uploading…", sub: "Sending to the cloud" },
-  processing: {
-    title: "Making your sticker…",
-    sub: "Removing background & adding border",
-  },
+// Steps — resizing owns step 0, upload owns step 1, processing owns steps 2-4
+const STEPS = [
+  { label: "Resizing image" },
+  { label: "Sending to cloud" },
+  { label: "Background removal" },
+  { label: "Adding sticker border" },
+  { label: "Finalising" },
+] as const;
+
+const STAGE_TITLES = {
+  resizing: "Resizing image…",
+  uploading: "Uploading image…",
+  processing: "Making your sticker…",
 };
 
-export function ProcessingScreen({ stage, progress }: ProcessingScreenProps) {
-  const { title, sub } = STAGE_MESSAGES[stage];
+/**
+ * Overall 0-100 progress across all three stages:
+ *   resizing   →  0 – 10  (CSS-animated indeterminate crawl)
+ *   uploading  → 10 – 55  (driven by upload progress prop)
+ *   processing → 55 – 100  (CSS-animated)
+ */
+function getOverallProgress(
+  stage: ProcessingScreenProps["stage"],
+  uploadProgress: number | undefined,
+): number {
+  if (stage === "resizing") return 0; // starting position; bar will CSS-animate to ~10
+  if (stage === "uploading") {
+    return 10 + Math.round((uploadProgress ?? 0) * 0.45);
+  }
+  return 55; // processing: CSS takes it from here to 100
+}
+
+function getCompletedSteps(
+  stage: ProcessingScreenProps["stage"],
+  uploadProgress: number | undefined,
+): Set<number> {
+  const done = new Set<number>();
+  // step 0 = Resizing image
+  if (stage === "uploading" || stage === "processing") done.add(0);
+  // step 1 = Sending to cloud
+  if (stage === "uploading" && (uploadProgress ?? 0) >= 100) done.add(1);
+  if (stage === "processing") done.add(1);
+  return done;
+}
+
+// Processing sub-steps (indices 2-4). Each ticks after a stagger delay once
+// isReady fires. Total sequence: 600 + 1100 + 1700 = 1700ms, then 400ms pause
+// before onComplete so the final tick is visible.
+const PROCESSING_STEP_DELAYS = [600, 1100, 1700];
+const COMPLETE_DELAY = PROCESSING_STEP_DELAYS[2] + 600;
+
+export function ProcessingScreen({
+  stage,
+  progress,
+  isReady,
+  onComplete,
+}: ProcessingScreenProps) {
+  const overallProgress = getOverallProgress(stage, progress);
+  const baseCompletedSteps = getCompletedSteps(stage, progress);
+
+  // Track which processing sub-steps (indices 2,3,4) have been ticked by the
+  // completion sequence. These are layered on top of baseCompletedSteps.
+  const [animatedDoneSteps, setAnimatedDoneSteps] = useState<Set<number>>(
+    new Set(),
+  );
+
+  useEffect(() => {
+    if (!isReady || stage !== "processing") return;
+
+    const timers: ReturnType<typeof setTimeout>[] = [];
+
+    // Tick each processing step with a stagger
+    PROCESSING_STEP_DELAYS.forEach((delay, i) => {
+      timers.push(
+        setTimeout(() => {
+          setAnimatedDoneSteps((prev) => new Set([...prev, i + 2]));
+        }, delay),
+      );
+    });
+
+    // Call onComplete after the last tick has had a moment to render
+    timers.push(
+      setTimeout(() => {
+        onComplete?.();
+      }, COMPLETE_DELAY),
+    );
+
+    return () => timers.forEach(clearTimeout);
+  }, [isReady, stage, onComplete]);
+
+  // Merge base completed steps with animation-driven ones
+  const completedSteps = new Set([...baseCompletedSteps, ...animatedDoneSteps]);
+
+  const title = STAGE_TITLES[stage];
 
   return (
     <>
       <SceneBackground />
       <div className="processing-screen">
         <div className="processing-screen__card">
+          {/* Orbit animation */}
           <div className="processing-screen__animation">
-            {/* Orbiting dots */}
             <div className="processing-screen__orbit">
               {[0, 1, 2, 3].map((i) => (
                 <span
@@ -33,62 +122,105 @@ export function ProcessingScreen({ stage, progress }: ProcessingScreenProps) {
                 />
               ))}
             </div>
-            {/* Center icon */}
             <div className="processing-screen__center">
               <span>✦</span>
             </div>
           </div>
 
+          {/* Title + subtitle */}
           <div className="processing-screen__text">
             <h2 className="processing-screen__title">{title}</h2>
-            <p className="processing-screen__sub">{sub}</p>
           </div>
 
-          {stage === "uploading" && progress !== undefined && (
-            <div className="processing-screen__progress">
-              <div className="processing-screen__progress-track">
-                <div
-                  className="processing-screen__progress-fill"
-                  style={{ width: `${progress}%` }}
-                />
-              </div>
-              <span className="processing-screen__progress-label">
-                {progress}%
-              </span>
+          {/* Combined progress bar — always shown */}
+          <div className="processing-screen__progress">
+            <div className="processing-screen__progress-track">
+              <div
+                className={[
+                  "processing-screen__progress-fill",
+                  stage === "resizing"
+                    ? "processing-screen__progress-fill--resizing"
+                    : "",
+                  stage === "uploading"
+                    ? "processing-screen__progress-fill--uploading"
+                    : "",
+                  stage === "processing"
+                    ? "processing-screen__progress-fill--processing"
+                    : "",
+                ]
+                  .filter(Boolean)
+                  .join(" ")}
+                style={
+                  stage !== "resizing" && stage !== "processing"
+                    ? { width: `${overallProgress}%` }
+                    : undefined
+                }
+              />
             </div>
-          )}
+          </div>
 
-          {stage === "processing" && (
-            <div className="processing-screen__steps">
-              {[
-                "Background removal",
-                "Adding sticker border",
-                "Finalising",
-              ].map((step, i) => (
+          {/* Steps — always rendered; visibility/state varies by stage */}
+          <div className="processing-screen__steps">
+            {STEPS.map((step, i) => {
+              const isDone = completedSteps.has(i);
+
+              // Which step is "active" (blinking) right now
+              const isActive =
+                !isDone &&
+                ((stage === "resizing" && i === 0) ||
+                  (stage === "uploading" && i === 1) ||
+                  (stage === "processing" && i >= 2));
+
+              return (
                 <div
-                  key={step}
-                  className="processing-screen__step"
-                  style={{ "--delay": `${i * 0.6}s` } as React.CSSProperties}
+                  key={step.label}
+                  className={[
+                    "processing-screen__step",
+                    isDone ? "processing-screen__step--done" : "",
+                    isActive ? "processing-screen__step--active" : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}
                 >
-                  <span className="processing-screen__step-dot" />
-                  <span className="processing-screen__step-label">{step}</span>
+                  <span
+                    className={[
+                      "processing-screen__step-icon",
+                      isActive ? "processing-screen__step-icon--spinning" : "",
+                    ]
+                      .filter(Boolean)
+                      .join(" ")}
+                  >
+                    {isDone ? (
+                      <RiCheckFill size={16} />
+                    ) : isActive ? (
+                      <RiLoader4Line size={16} />
+                    ) : (
+                      <RiCircleLine size={16} />
+                    )}
+                  </span>
+                  <span className="processing-screen__step-label">
+                    {step.label}
+                  </span>
                 </div>
-              ))}
-            </div>
-          )}
+              );
+            })}
+          </div>
         </div>
 
         <style>{`
           .processing-screen {
             flex: 1;
             display: flex;
+            flex-direction: column;
             align-items: center;
             justify-content: center;
             padding: 32px 24px;
+            gap: 12px;
             position: relative;
             z-index: 1;
           }
 
+          /* ── Main card ─────────────────────────────────────────── */
           .processing-screen__card {
             background: var(--color-bg-card);
             border-radius: var(--radius-xl);
@@ -108,6 +240,7 @@ export function ProcessingScreen({ stage, progress }: ProcessingScreenProps) {
             to   { opacity: 1; transform: translateY(0) scale(1); }
           }
 
+          /* ── Orbit animation ───────────────────────────────────── */
           .processing-screen__animation {
             width: 96px;
             height: 96px;
@@ -144,7 +277,7 @@ export function ProcessingScreen({ stage, progress }: ProcessingScreenProps) {
 
           @keyframes dot-pulse {
             0%, 100% { opacity: 0.3; transform: scale(0.8) translateX(-50%); }
-            50% { opacity: 1; transform: scale(1.2) translateX(-50%); }
+            50%       { opacity: 1;   transform: scale(1.2) translateX(-50%); }
           }
 
           .processing-screen__dot:nth-child(2) { animation-name: dot-pulse-side; }
@@ -153,12 +286,11 @@ export function ProcessingScreen({ stage, progress }: ProcessingScreenProps) {
 
           @keyframes dot-pulse-side {
             0%, 100% { opacity: 0.3; transform: scale(0.8) translateY(-50%); }
-            50% { opacity: 1; transform: scale(1.2) translateY(-50%); }
+            50%       { opacity: 1;   transform: scale(1.2) translateY(-50%); }
           }
-
           @keyframes dot-pulse-bottom {
             0%, 100% { opacity: 0.3; transform: scale(0.8) translateX(-50%); }
-            50% { opacity: 1; transform: scale(1.2) translateX(-50%); }
+            50%       { opacity: 1;   transform: scale(1.2) translateX(-50%); }
           }
 
           .processing-screen__center {
@@ -177,9 +309,10 @@ export function ProcessingScreen({ stage, progress }: ProcessingScreenProps) {
 
           @keyframes center-breathe {
             0%, 100% { transform: scale(1); }
-            50% { transform: scale(1.06); }
+            50%       { transform: scale(1.06); }
           }
 
+          /* ── Text ──────────────────────────────────────────────── */
           .processing-screen__text { text-align: center; }
 
           .processing-screen__title {
@@ -187,7 +320,7 @@ export function ProcessingScreen({ stage, progress }: ProcessingScreenProps) {
             font-size: 20px;
             font-weight: 700;
             color: var(--color-ink);
-            margin-bottom: 6px;
+            margin-bottom: 2px;
             letter-spacing: -0.3px;
           }
 
@@ -196,6 +329,7 @@ export function ProcessingScreen({ stage, progress }: ProcessingScreenProps) {
             color: var(--color-ink-secondary);
           }
 
+          /* ── Progress bar ──────────────────────────────────────── */
           .processing-screen__progress {
             width: 100%;
             display: flex;
@@ -215,17 +349,37 @@ export function ProcessingScreen({ stage, progress }: ProcessingScreenProps) {
             height: 100%;
             background: var(--color-accent);
             border-radius: var(--radius-full);
-            transition: width 0.3s ease;
+            transition: width 0.4s ease;
           }
 
-          .processing-screen__progress-label {
-            font-size: 12px;
-            font-weight: 500;
-            color: var(--color-ink-secondary);
-            min-width: 30px;
-            text-align: right;
+          /* Resizing: CSS-animated crawl from 5% → 10% */
+          .processing-screen__progress-fill--resizing {
+            animation: resizing-fill 1.5s ease-out forwards;
+          }
+          @keyframes resizing-fill {
+            from { width: 0%; }
+            to   { width: 10%; }
           }
 
+          /* Uploading: CSS-animated crawl from 10% → 55% */
+          .processing-screen__progress-fill--uploading {
+            animation: uploading-fill 8s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+          }
+          @keyframes uploading-fill {
+            from { width: 10%; }
+            to   { width: 55%; }
+          }
+
+          /* Processing: CSS-animated crawl from 55% → 100% */
+          .processing-screen__progress-fill--processing {
+            animation: processing-fill 8s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+          }
+          @keyframes processing-fill {
+            from { width: 55%; }
+            to   { width: 100%; }
+          }
+
+          /* ── Steps ─────────────────────────────────────────────── */
           .processing-screen__steps {
             width: 100%;
             display: flex;
@@ -237,33 +391,58 @@ export function ProcessingScreen({ stage, progress }: ProcessingScreenProps) {
             display: flex;
             align-items: center;
             gap: 10px;
-            animation: step-in 0.4s ease both;
-            animation-delay: var(--delay);
+            opacity: 0.35;
+            transition: opacity 0.4s ease;
           }
 
-          @keyframes step-in {
-            from { opacity: 0; transform: translateX(-8px); }
-            to { opacity: 1; transform: translateX(0); }
+          .processing-screen__step--active {
+            opacity: 1;
           }
 
-          .processing-screen__step-dot {
-            width: 6px;
-            height: 6px;
-            background: var(--color-accent);
-            border-radius: 50%;
+          .processing-screen__step--done {
+            opacity: 1;
+          }
+
+          .processing-screen__step-icon {
+            width: 16px;
+            height: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
             flex-shrink: 0;
-            animation: dot-blink 1.2s ease-in-out infinite;
-            animation-delay: var(--delay);
+            color: var(--color-ink-secondary);
+            transition: color 0.3s ease;
           }
 
-          @keyframes dot-blink {
-            0%, 100% { opacity: 0.4; }
-            50% { opacity: 1; }
+          .processing-screen__step--done .processing-screen__step-icon {
+            color: var(--color-accent);
+          }
+
+          .processing-screen__step--active .processing-screen__step-icon {
+            color: var(--color-accent);
+          }
+
+          .processing-screen__step-icon--spinning {
+            animation: icon-spin 1s linear infinite;
+          }
+
+          @keyframes icon-spin {
+            to { transform: rotate(360deg); }
           }
 
           .processing-screen__step-label {
             font-size: 13px;
             color: var(--color-ink-secondary);
+            transition: color 0.4s ease;
+          }
+
+          .processing-screen__step--done .processing-screen__step-label {
+            color: var(--color-ink);
+            font-weight: 500;
+          }
+
+          .processing-screen__step--active .processing-screen__step-label {
+            color: var(--color-ink);
           }
         `}</style>
       </div>

@@ -18,6 +18,7 @@ export type UploadState =
   | { status: "resizing" }
   | { status: "uploading"; progress: number }
   | { status: "processing" }
+  | ({ status: "ready"; stickerUrl: string; outputKey: string } & QuotaMetadata)
   | ({ status: "done"; stickerUrl: string; outputKey: string } & QuotaMetadata)
   | { status: "error"; message: string };
 
@@ -94,8 +95,10 @@ export function useUpload() {
         throw new Error("No sticker URL returned. Please try again.");
       }
 
+      // Move to "ready" — ProcessingScreen will tick through its completion
+      // animation then call onComplete() which advances to "done".
       setState({
-        status: "done",
+        status: "ready",
         stickerUrl: body.sticker_url,
         outputKey: body.output_key,
         remainingToday: body.remaining_today,
@@ -112,7 +115,16 @@ export function useUpload() {
     setState({ status: "idle" });
   }, []);
 
-  return { state, upload, reset };
+  // Called by ProcessingScreen once the completion animation finishes.
+  // Moves from "ready" → "done" so App renders the ResultScreen.
+  const complete = useCallback(() => {
+    setState((prev) => {
+      if (prev.status !== "ready") return prev;
+      return { ...prev, status: "done" };
+    });
+  }, []);
+
+  return { state, upload, reset, complete };
 }
 
 function getDeviceId(): string {
@@ -126,7 +138,9 @@ function getDeviceId(): string {
   return deviceId;
 }
 
-async function readLambdaPayload(response: Response): Promise<Record<string, any>> {
+async function readLambdaPayload(
+  response: Response,
+): Promise<Record<string, any>> {
   const result = await response.json().catch(() => ({}));
   if (typeof result.body === "string") return JSON.parse(result.body);
   return result.body ?? result;
