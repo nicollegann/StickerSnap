@@ -1,0 +1,36 @@
+.sceneBg {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  background-color: #f5f2ed;
+  pointer-events: none;
+}
+
+.grid {
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(
+      to bottom,
+      rgba(180, 170, 155, 0.35) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      to right,
+      rgba(180, 170, 155, 0.35) 1px,
+      transparent 1px
+    );
+  background-size: 28px 28px;
+}
+
+.shapes {
+  position: absolute;
+  inset: 0;
+  background-image: url('assets/background_shapes.png');
+  background-size: 1000px;
+  background-position: center;
+  background-repeat: no-repeat;
+  opacity: 1;
+  pointer-events: none;
+}

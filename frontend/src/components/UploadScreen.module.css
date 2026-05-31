@@ -1,0 +1,228 @@
+.uploadScreen {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 24px;
+  gap: 32px;
+  max-width: 480px;
+  margin: 0 auto;
+  width: 100%;
+  position: relative;
+  z-index: 1;
+}
+
+/* ── Header ──────────────────────────────────────────── */
+.header {
+  text-align: center;
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.logoIcon {
+  font-size: 20px;
+  color: var(--color-accent);
+  animation: spinSlow 8s linear infinite;
+}
+
+@keyframes spinSlow {
+  to { transform: rotate(360deg); }
+}
+
+.logoText {
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--color-ink);
+  letter-spacing: -0.5px;
+}
+
+.tagline {
+  font-size: 15px;
+  color: var(--color-ink-secondary);
+  font-weight: 300;
+}
+
+/* ── Dropzone ─────────────────────────────────────────── */
+.dropzone {
+  width: 100%;
+  aspect-ratio: 1;
+  max-width: 340px;
+  background: var(--color-bg-card);
+  border-radius: var(--radius-xl);
+  border: 2px dashed var(--color-border-strong);
+  cursor: pointer;
+  position: relative;
+  transition:
+    border-color var(--transition-base),
+    background var(--transition-base),
+    transform var(--transition-spring);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  box-shadow: var(--shadow-md);
+  outline: none;
+  overflow: hidden;
+}
+
+.dropzone:hover,
+.dropzone:focus {
+  border-color: var(--color-accent);
+  background: var(--color-accent-light);
+  transform: scale(1.01);
+}
+
+.dropzoneDragging {
+  border-color: var(--color-accent);
+  background: var(--color-accent-light);
+  transform: scale(1.03);
+  box-shadow: var(--shadow-accent);
+}
+
+.dropzoneInner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 32px;
+  pointer-events: none;
+}
+
+.dropzoneIcon {
+  width: 72px;
+  height: 72px;
+  background: var(--color-bg-subtle);
+  border-radius: var(--radius-lg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-accent);
+  transition: background var(--transition-base);
+}
+
+.dropzone:hover .dropzoneIcon,
+.dropzoneDragging .dropzoneIcon {
+  background: rgba(255, 92, 58, 0.12);
+}
+
+.dropzoneTitle {
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--color-ink);
+  text-align: center;
+}
+
+.dropzoneHint {
+  font-size: 12px;
+  color: var(--color-ink-tertiary);
+  text-align: center;
+  letter-spacing: 0.02em;
+}
+
+/* ── Corner decorations ───────────────────────────────── */
+.corner {
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  border-color: var(--color-accent);
+  border-style: solid;
+  opacity: 0;
+  transition: opacity var(--transition-base);
+}
+
+.dropzone:hover .corner,
+.dropzoneDragging .corner {
+  opacity: 1;
+}
+
+.cornerTl {
+  top: 12px;
+  left: 12px;
+  border-width: 2px 0 0 2px;
+  border-radius: 4px 0 0 0;
+}
+
+.cornerTr {
+  top: 12px;
+  right: 12px;
+  border-width: 2px 2px 0 0;
+  border-radius: 0 4px 0 0;
+}
+
+.cornerBl {
+  bottom: 12px;
+  left: 12px;
+  border-width: 0 0 2px 2px;
+  border-radius: 0 0 0 4px;
+}
+
+.cornerBr {
+  bottom: 12px;
+  right: 12px;
+  border-width: 0 2px 2px 0;
+  border-radius: 0 0 4px 0;
+}
+
+/* ── Examples ─────────────────────────────────────────── */
+.examples {
+  text-align: center;
+}
+
+.examplesLabel {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--color-ink-tertiary);
+  margin-bottom: 10px;
+  font-weight: 500;
+}
+
+.examplesPills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+}
+
+.examplesPill {
+  font-size: 13px;
+  padding: 6px 14px;
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+  color: var(--color-ink-secondary);
+  box-shadow: var(--shadow-sm);
+}
+
+/* ── Daily limit banner ───────────────────────────────── */
+.limitBanner {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: var(--color-bg-subtle, #f2f2f0);
+  border-top: 1px solid var(--color-border, rgba(0, 0, 0, 0.08));
+  padding: 10px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  cursor: default;
+}
+
+.limitBannerText {
+  font-size: 12px;
+  color: var(--color-ink-secondary, #6b6b6b);
+  font-weight: 400;
+  letter-spacing: 0.01em;
+  text-align: center;
+}
