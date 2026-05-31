@@ -6,13 +6,19 @@ import {
 } from "../utils/imageUtils";
 
 const LAMBDA_URL = import.meta.env.VITE_LAMBDA_URL as string;
+const DEVICE_ID_STORAGE_KEY = "stickersnap_device_id";
+
+type QuotaMetadata = {
+  remainingToday?: number;
+  resetAt?: string;
+};
 
 export type UploadState =
   | { status: "idle" }
   | { status: "resizing" }
   | { status: "uploading"; progress: number }
   | { status: "processing" }
-  | { status: "done"; stickerUrl: string; outputKey: string }
+  | ({ status: "done"; stickerUrl: string; outputKey: string } & QuotaMetadata)
   | { status: "error"; message: string };
 
 export function useUpload() {
@@ -33,6 +39,7 @@ export function useUpload() {
 
       // 3. Upload to S3 via presigned PUT URL
       setState({ status: "uploading", progress: 0 });
+      const deviceId = getDeviceId();
       const uploadId = generateUploadId();
       const objectKey = `uploads/${uploadId}.jpg`;
 
@@ -43,25 +50,22 @@ export function useUpload() {
         body: JSON.stringify({
           action: "presign_upload",
           object_key: objectKey,
+          device_id: deviceId,
         }),
       });
 
       if (!presignRes.ok) {
-        throw new Error("Failed to get upload URL. Please try again.");
+        const err = await readLambdaPayload(presignRes);
+        throw new Error(
+          formatUploadError(err, "Failed to get upload URL. Please try again."),
+        );
       }
 
-      const presignData = await presignRes.json();
-      console.log("presignData raw:", presignData); // remove after debugging
-
-      const presignBody = presignData.upload_url
-        ? presignData // already unwrapped
-        : typeof presignData.body === "string"
-          ? JSON.parse(presignData.body) // double-wrapped
-          : (presignData.body ?? presignData); // object body or fallback
+      const presignBody = await readLambdaPayload(presignRes);
 
       const { upload_url } = presignBody;
       if (!upload_url) {
-        throw new Error(`No upload URL. Got: ${JSON.stringify(presignData)}`); // better error message
+        throw new Error(`No upload URL. Got: ${JSON.stringify(presignBody)}`);
       }
 
       // Upload directly to S3
@@ -74,17 +78,17 @@ export function useUpload() {
       const processRes = await fetch(LAMBDA_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ object_key: objectKey }),
+        body: JSON.stringify({ object_key: objectKey, device_id: deviceId }),
       });
 
       if (!processRes.ok) {
-        const err = await processRes.json().catch(() => ({}));
-        throw new Error(err.error || "Processing failed. Please try again.");
+        const err = await readLambdaPayload(processRes);
+        throw new Error(
+          formatUploadError(err, "Processing failed. Please try again."),
+        );
       }
 
-      const result = await processRes.json();
-      const body =
-        typeof result.body === "string" ? JSON.parse(result.body) : result;
+      const body = await readLambdaPayload(processRes);
 
       if (!body.sticker_url) {
         throw new Error("No sticker URL returned. Please try again.");
@@ -94,6 +98,8 @@ export function useUpload() {
         status: "done",
         stickerUrl: body.sticker_url,
         outputKey: body.output_key,
+        remainingToday: body.remaining_today,
+        resetAt: body.reset_at,
       });
     } catch (err) {
       const message =
@@ -107,6 +113,44 @@ export function useUpload() {
   }, []);
 
   return { state, upload, reset };
+}
+
+function getDeviceId(): string {
+  const existing = localStorage.getItem(DEVICE_ID_STORAGE_KEY);
+  if (existing) return existing;
+
+  const deviceId =
+    crypto.randomUUID?.() ??
+    `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  localStorage.setItem(DEVICE_ID_STORAGE_KEY, deviceId);
+  return deviceId;
+}
+
+async function readLambdaPayload(response: Response): Promise<Record<string, any>> {
+  const result = await response.json().catch(() => ({}));
+  if (typeof result.body === "string") return JSON.parse(result.body);
+  return result.body ?? result;
+}
+
+function formatUploadError(
+  payload: Record<string, any>,
+  fallback: string,
+): string {
+  if (payload.reset_at) {
+    return `Sticker generation limit reached. You can make more after ${formatResetTime(payload.reset_at)}.`;
+  }
+  return payload.error || fallback;
+}
+
+function formatResetTime(resetAt: string): string {
+  const date = new Date(resetAt);
+  if (Number.isNaN(date.getTime())) return "the next reset";
+  return date.toLocaleString([], {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
 }
 
 function uploadWithProgress(

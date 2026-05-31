@@ -96,6 +96,16 @@ export function UploadScreen({ onFile }: UploadScreenProps) {
           <span className="upload-screen__corner upload-screen__corner--tr" />
           <span className="upload-screen__corner upload-screen__corner--bl" />
           <span className="upload-screen__corner upload-screen__corner--br" />
+
+          {/* Daily limit banner */}
+          <div
+            className="upload-screen__limit-banner"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <span className="upload-screen__limit-banner-text">
+              Limited free usage: 2 stickers per day!
+            </span>
+          </div>
         </div>
 
         <div className="upload-screen__examples">
@@ -181,10 +191,12 @@ export function UploadScreen({ onFile }: UploadScreenProps) {
             position: relative;
             transition: border-color var(--transition-base), background var(--transition-base), transform var(--transition-spring);
             display: flex;
+            flex-direction: column;
             align-items: center;
             justify-content: center;
             box-shadow: var(--shadow-md);
             outline: none;
+            overflow: hidden;
           }
 
           .upload-screen__dropzone:hover,
@@ -285,6 +297,30 @@ export function UploadScreen({ onFile }: UploadScreenProps) {
             border-radius: var(--radius-full);
             color: var(--color-ink-secondary);
             box-shadow: var(--shadow-sm);
+          }
+
+          /* Daily limit banner */
+          .upload-screen__limit-banner {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: var(--color-bg-subtle, #f2f2f0);
+            border-top: 1px solid var(--color-border, rgba(0,0,0,0.08));
+            padding: 10px 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            pointer-events: none;
+            cursor: default;
+          }
+
+          .upload-screen__limit-banner-text {
+            font-size: 12px;
+            color: var(--color-ink-secondary, #6b6b6b);
+            font-weight: 400;
+            letter-spacing: 0.01em;
+            text-align: center;
           }
         `}</style>
       </div>

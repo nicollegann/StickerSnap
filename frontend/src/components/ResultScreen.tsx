@@ -5,6 +5,7 @@ import { FaFileDownload, FaCopy, FaShare, FaCheck } from "react-icons/fa";
 
 interface ResultScreenProps {
   stickerUrl: string;
+  remainingToday?: number;
   onReset: () => void;
 }
 
@@ -23,8 +24,13 @@ const SHARE_ACTIONS: ShareAction[] = [
   { id: "share", label: "Share", icon: FaShare, color: "#2AABEE" },
 ];
 
-export function ResultScreen({ stickerUrl, onReset }: ResultScreenProps) {
+export function ResultScreen({
+  stickerUrl,
+  remainingToday,
+  onReset,
+}: ResultScreenProps) {
   const { share } = useShare();
+  const limitReached = remainingToday === 0;
   const [actionStates, setActionStates] = useState<
     Record<ShareTarget, ActionState>
   >({
@@ -102,8 +108,13 @@ export function ResultScreen({ stickerUrl, onReset }: ResultScreenProps) {
         </div>
 
         {/* Try another */}
-        <button className="result-screen__reset-btn" onClick={onReset}>
-          <span>✦</span> Make another sticker
+        <button
+          className="result-screen__reset-btn"
+          onClick={onReset}
+          disabled={limitReached}
+        >
+          <span>✦</span>{" "}
+          {limitReached ? "Daily limit reached" : "Make another sticker"}
         </button>
 
         <style>{`
@@ -285,6 +296,13 @@ export function ResultScreen({ stickerUrl, onReset }: ResultScreenProps) {
 
           .result-screen__reset-btn:active {
             transform: translateY(0) scale(0.97);
+          }
+
+          .result-screen__reset-btn:disabled {
+            cursor: not-allowed;
+            opacity: 0.55;
+            box-shadow: none;
+            transform: none;
           }
 
           .result-screen__reset-btn span {

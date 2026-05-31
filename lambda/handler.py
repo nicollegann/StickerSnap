@@ -17,6 +17,11 @@ Environment variables (set by CDK):
   PRESIGNED_URL_EXPIRY_SECONDS — download URL lifetime (default 3600)
   BORDER_SIZE_PX               — white border width in pixels (default 12)
   MAX_IMAGE_DIMENSION_PX       — resize cap before processing (default 1024)
+  QUOTA_TABLE_NAME             — DynamoDB table for quota counters/reservations
+  QUOTA_NAMESPACE              — namespace for shared quota table keys
+  DAILY_DEVICE_LIMIT           — generations per device per UTC day (default 2)
+  DAILY_IP_LIMIT               — generations per IP per UTC day (default 3)
+  HOURLY_IP_LIMIT              — generations per IP per UTC hour (default 2)
 """
 from __future__ import annotations
 
@@ -50,11 +55,14 @@ if _PYMATTING_DST not in sys.path:
 import io
 import json
 import logging
-import uuid
+import hashlib
+import re
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import boto3
 from botocore.config import Config
+from botocore.exceptions import ClientError
 import numpy as np
 from PIL import Image, ImageFilter
 from rembg import new_session, remove
@@ -70,6 +78,11 @@ PRESIGNED_URL_EXPIRY = int(os.environ.get("PRESIGNED_URL_EXPIRY_SECONDS", "3600"
 BORDER_SIZE_PX = int(os.environ.get("BORDER_SIZE_PX", "12"))
 MAX_DIMENSION = int(os.environ.get("MAX_IMAGE_DIMENSION_PX", "1024"))
 ALLOWED_ORIGIN = os.environ.get("ALLOWED_ORIGIN", "http://localhost:5173")
+QUOTA_TABLE_NAME = os.environ.get("QUOTA_TABLE_NAME", "")
+QUOTA_NAMESPACE = os.environ.get("QUOTA_NAMESPACE", "default")
+DAILY_DEVICE_LIMIT = int(os.environ.get("DAILY_DEVICE_LIMIT", "2"))
+DAILY_IP_LIMIT = int(os.environ.get("DAILY_IP_LIMIT", "3"))
+HOURLY_IP_LIMIT = int(os.environ.get("HOURLY_IP_LIMIT", "2"))
 
 # Supported input MIME types → Pillow format strings
 SUPPORTED_CONTENT_TYPES: dict[str, str] = {
@@ -100,7 +113,33 @@ _S3 = boto3.client(
     ),
 )
 
+_DDB = boto3.client("dynamodb", region_name=AWS_REGION)
+_DEVICE_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{8,128}$")
+
 # ── Entry point ─────────────────────────────────────────────────────────────
+
+class QuotaExceededError(Exception):
+    """Raised when a device or IP has reached its generation quota."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        reset_at: str | None = None,
+        remaining_today: int | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.reset_at = reset_at
+        self.remaining_today = remaining_today
+
+    def to_payload(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {}
+        if self.reset_at is not None:
+            payload["reset_at"] = self.reset_at
+        if self.remaining_today is not None:
+            payload["remaining_today"] = self.remaining_today
+        return payload
+
 
 def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     """Lambda entry point. Accepts both direct invocations and Function URL
@@ -127,15 +166,18 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         action = body.get("action", "")
         if action == "presign_upload":
             object_key = body.get("object_key", "")
+            device_id = body.get("device_id", "")
             if not object_key:
                 return _error(400, "Missing 'object_key' in presign_upload request.")
             if not object_key.startswith(UPLOADS_PREFIX):
                 return _error(400, f"'object_key' must start with '{UPLOADS_PREFIX}'.")
+            quota = _reserve_generation_quota(event, object_key, device_id)
             upload_url = _presign_upload_url(object_key)
-            return _ok({"upload_url": upload_url, "object_key": object_key})
+            return _ok({"upload_url": upload_url, "object_key": object_key, **quota})
 
         # ── Main processing pipeline ─────────────────────────────────────────
         object_key: str = body.get("object_key", "")
+        device_id = body.get("device_id", "")
 
         if not object_key:
             return _error(400, "Missing 'object_key' in request body.")
@@ -146,6 +188,8 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                 f"'object_key' must start with '{UPLOADS_PREFIX}'. "
                 f"Got: {object_key!r}",
             )
+
+        quota = _consume_generation_reservation(object_key, device_id)
 
         # 1. Download original image from S3
         image_bytes, content_type = _download_from_s3(object_key)
@@ -187,9 +231,13 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                 "sticker_url": presigned_url,
                 "output_key": output_key,
                 "expires_in": PRESIGNED_URL_EXPIRY,
+                **quota,
             }
         )
 
+    except QuotaExceededError as exc:
+        logger.info("Quota exceeded: %s", exc)
+        return _error(429, str(exc), extra=exc.to_payload())
     except ClientError as exc:
         logger.exception("S3 error")
         return _error(502, f"Storage error: {exc.response['Error']['Code']}")
@@ -199,6 +247,261 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     except Exception:  # noqa: BLE001
         logger.exception("Unexpected error")
         return _error(500, "Internal processing error. Please try again.")
+
+
+# ── Quota helpers ────────────────────────────────────────────────────────────
+
+def _reserve_generation_quota(
+    event: dict[str, Any],
+    object_key: str,
+    device_id: str,
+) -> dict[str, Any]:
+    """Reserve one sticker generation before giving the browser an upload URL."""
+    if not QUOTA_TABLE_NAME:
+        logger.warning("QUOTA_TABLE_NAME is not set; quota enforcement is disabled.")
+        return {}
+
+    device_hash = _validate_and_hash_device_id(device_id)
+    ip_hash = _hash_value("ip", _extract_source_ip(event))
+    now = datetime.now(timezone.utc)
+    day_key, hour_key, day_reset_at, day_ttl, hour_reset_at, hour_ttl = (
+        _quota_windows(now)
+    )
+
+    device_counter_key = _scoped_quota_key(f"device#{device_hash}#day#{day_key}")
+    ip_daily_counter_key = _scoped_quota_key(f"ip#{ip_hash}#day#{day_key}")
+    ip_hourly_counter_key = _scoped_quota_key(f"ip#{ip_hash}#hour#{hour_key}")
+    reservation_key = _reservation_key(object_key)
+
+    transact_items = [
+        _quota_counter_update(
+            device_counter_key,
+            DAILY_DEVICE_LIMIT,
+            day_reset_at,
+            day_ttl,
+        ),
+        _quota_counter_update(
+            ip_daily_counter_key,
+            DAILY_IP_LIMIT,
+            day_reset_at,
+            day_ttl,
+        ),
+        _quota_counter_update(
+            ip_hourly_counter_key,
+            HOURLY_IP_LIMIT,
+            hour_reset_at,
+            hour_ttl,
+        ),
+        {
+            "Put": {
+                "TableName": QUOTA_TABLE_NAME,
+                "Item": {
+                    "quota_key": {"S": reservation_key},
+                    "status": {"S": "reserved"},
+                    "object_key": {"S": object_key},
+                    "device_hash": {"S": device_hash},
+                    "ip_hash": {"S": ip_hash},
+                    "created_at": {"S": now.isoformat().replace("+00:00", "Z")},
+                    "reset_at": {"S": day_reset_at},
+                    "ttl": {"N": str(day_ttl)},
+                },
+                "ConditionExpression": "attribute_not_exists(quota_key)",
+            }
+        },
+    ]
+
+    try:
+        _DDB.transact_write_items(TransactItems=transact_items)
+    except ClientError as exc:
+        code = exc.response.get("Error", {}).get("Code", "")
+        if code == "TransactionCanceledException":
+            raise _quota_transaction_error(
+                [
+                    (device_counter_key, DAILY_DEVICE_LIMIT, day_reset_at),
+                    (ip_daily_counter_key, DAILY_IP_LIMIT, day_reset_at),
+                    (ip_hourly_counter_key, HOURLY_IP_LIMIT, hour_reset_at),
+                ],
+                device_counter_key,
+                day_reset_at,
+            ) from exc
+        raise
+
+    return _device_quota_snapshot(device_counter_key, day_reset_at)
+
+
+def _consume_generation_reservation(object_key: str, device_id: str) -> dict[str, Any]:
+    """Require a matching reservation before the expensive processing step."""
+    if not QUOTA_TABLE_NAME:
+        logger.warning("QUOTA_TABLE_NAME is not set; quota enforcement is disabled.")
+        return {}
+
+    device_hash = _validate_and_hash_device_id(device_id)
+    now = datetime.now(timezone.utc)
+
+    try:
+        response = _DDB.update_item(
+            TableName=QUOTA_TABLE_NAME,
+            Key={"quota_key": {"S": _reservation_key(object_key)}},
+            UpdateExpression="SET #status = :consumed, consumed_at = :now",
+            ConditionExpression=(
+                "attribute_exists(quota_key) "
+                "AND #status = :reserved "
+                "AND device_hash = :device_hash"
+            ),
+            ExpressionAttributeNames={"#status": "status"},
+            ExpressionAttributeValues={
+                ":consumed": {"S": "consumed"},
+                ":reserved": {"S": "reserved"},
+                ":device_hash": {"S": device_hash},
+                ":now": {"S": now.isoformat().replace("+00:00", "Z")},
+            },
+            ReturnValues="ALL_NEW",
+        )
+    except ClientError as exc:
+        code = exc.response.get("Error", {}).get("Code", "")
+        if code == "ConditionalCheckFailedException":
+            raise ValueError(
+                "This sticker request was not reserved or has already been processed."
+            ) from exc
+        raise
+
+    attrs = response.get("Attributes", {})
+    reset_at = attrs.get("reset_at", {}).get("S")
+    day_key = now.strftime("%Y-%m-%d")
+    device_counter_key = _scoped_quota_key(f"device#{device_hash}#day#{day_key}")
+    return _device_quota_snapshot(device_counter_key, reset_at)
+
+
+def _quota_counter_update(
+    quota_key: str,
+    limit: int,
+    reset_at: str,
+    ttl: int,
+) -> dict[str, Any]:
+    return {
+        "Update": {
+            "TableName": QUOTA_TABLE_NAME,
+            "Key": {"quota_key": {"S": quota_key}},
+            "UpdateExpression": (
+                "SET #count = if_not_exists(#count, :zero) + :one, "
+                "#ttl = :ttl, reset_at = :reset_at"
+            ),
+            "ConditionExpression": "attribute_not_exists(#count) OR #count < :limit",
+            "ExpressionAttributeNames": {
+                "#count": "count",
+                "#ttl": "ttl",
+            },
+            "ExpressionAttributeValues": {
+                ":zero": {"N": "0"},
+                ":one": {"N": "1"},
+                ":limit": {"N": str(limit)},
+                ":ttl": {"N": str(ttl)},
+                ":reset_at": {"S": reset_at},
+            },
+        }
+    }
+
+
+def _device_quota_snapshot(
+    device_counter_key: str,
+    reset_at: str | None,
+) -> dict[str, Any]:
+    if not QUOTA_TABLE_NAME:
+        return {}
+
+    try:
+        response = _DDB.get_item(
+            TableName=QUOTA_TABLE_NAME,
+            Key={"quota_key": {"S": device_counter_key}},
+            ConsistentRead=True,
+        )
+    except ClientError:
+        logger.exception("Failed to read quota snapshot")
+        return {"reset_at": reset_at} if reset_at else {}
+
+    count = int(response.get("Item", {}).get("count", {}).get("N", "0"))
+    return {
+        "remaining_today": max(DAILY_DEVICE_LIMIT - count, 0),
+        "reset_at": reset_at,
+    }
+
+
+def _quota_transaction_error(
+    counters: list[tuple[str, int, str]],
+    device_counter_key: str,
+    fallback_reset_at: str,
+) -> Exception:
+    for counter_key, limit, reset_at in counters:
+        count = _quota_counter_count(counter_key)
+        if count >= limit:
+            snapshot = _device_quota_snapshot(device_counter_key, fallback_reset_at)
+            return QuotaExceededError(
+                "Sticker generation limit reached. Please try again after the reset time.",
+                reset_at=reset_at,
+                remaining_today=snapshot.get("remaining_today"),
+            )
+
+    return ValueError("This sticker request has already been reserved.")
+
+
+def _quota_counter_count(counter_key: str) -> int:
+    response = _DDB.get_item(
+        TableName=QUOTA_TABLE_NAME,
+        Key={"quota_key": {"S": counter_key}},
+        ConsistentRead=True,
+    )
+    return int(response.get("Item", {}).get("count", {}).get("N", "0"))
+
+
+def _quota_windows(now: datetime) -> tuple[str, str, str, int, str, int]:
+    day_key = now.strftime("%Y-%m-%d")
+    hour_key = now.strftime("%Y-%m-%dT%H")
+    tomorrow = (now + timedelta(days=1)).date()
+    day_reset = datetime(
+        tomorrow.year,
+        tomorrow.month,
+        tomorrow.day,
+        tzinfo=timezone.utc,
+    )
+    hour_reset = (now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1))
+    day_reset_at = day_reset.isoformat().replace("+00:00", "Z")
+    hour_reset_at = hour_reset.isoformat().replace("+00:00", "Z")
+    day_ttl = int((day_reset + timedelta(days=1)).timestamp())
+    hour_ttl = int((hour_reset + timedelta(hours=2)).timestamp())
+    return day_key, hour_key, day_reset_at, day_ttl, hour_reset_at, hour_ttl
+
+
+def _validate_and_hash_device_id(device_id: str) -> str:
+    if not isinstance(device_id, str) or not _DEVICE_ID_RE.match(device_id):
+        raise ValueError("Missing or invalid 'device_id'.")
+    return _hash_value("device", device_id)
+
+
+def _hash_value(kind: str, value: str) -> str:
+    return hashlib.sha256(f"{kind}:{value}".encode("utf-8")).hexdigest()
+
+
+def _reservation_key(object_key: str) -> str:
+    return _scoped_quota_key(f"upload#{_hash_value('object_key', object_key)}")
+
+
+def _scoped_quota_key(key: str) -> str:
+    return f"env#{QUOTA_NAMESPACE}#{key}"
+
+
+def _extract_source_ip(event: dict[str, Any]) -> str:
+    request_context = event.get("requestContext", {})
+    http_context = request_context.get("http", {})
+    source_ip = http_context.get("sourceIp")
+    if source_ip:
+        return source_ip
+
+    headers = event.get("headers", {}) or {}
+    forwarded_for = headers.get("x-forwarded-for") or headers.get("X-Forwarded-For")
+    if forwarded_for:
+        return forwarded_for.split(",", 1)[0].strip()
+
+    return "unknown"
 
 
 # ── Processing helpers ───────────────────────────────────────────────────────
@@ -388,16 +691,20 @@ def _ok(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _error(status: int, message: str) -> dict[str, Any]:
+def _error(
+    status: int,
+    message: str,
+    *,
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     logger.warning("Returning %d: %s", status, message)
+    payload = {"error": message}
+    if extra:
+        payload.update(extra)
     return {
         "statusCode": status,
         "headers": {
             "Content-Type": "application/json",
         },
-        "body": json.dumps({"error": message}),
+        "body": json.dumps(payload),
     }
-
-
-# Re-export for boto3 type hint
-from botocore.exceptions import ClientError  # noqa: E402 (must be after imports above)

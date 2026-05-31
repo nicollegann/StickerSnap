@@ -24,6 +24,7 @@ export default function App() {
         {state.status === 'done' && (
           <ResultScreen
             stickerUrl={state.stickerUrl}
+            remainingToday={state.remainingToday}
             onReset={reset}
           />
         )}

@@ -59,6 +59,40 @@ def _make_rgba_png(width: int = 100, height: int = 100) -> bytes:
     return buf.getvalue()
 
 
+def _create_quota_table(ddb: Any, table_name: str = "quota-table") -> None:
+    ddb.create_table(
+        TableName=table_name,
+        KeySchema=[{"AttributeName": "quota_key", "KeyType": "HASH"}],
+        AttributeDefinitions=[{"AttributeName": "quota_key", "AttributeType": "S"}],
+        BillingMode="PAY_PER_REQUEST",
+    )
+
+
+def _configure_quota(
+    monkeypatch: pytest.MonkeyPatch,
+    h: Any,
+    table_name: str = "quota-table",
+    *,
+    daily_device_limit: int = 5,
+) -> None:
+    ddb = boto3.client("dynamodb", region_name="ap-southeast-1")
+    _create_quota_table(ddb, table_name)
+    monkeypatch.setattr(h, "_DDB", ddb)
+    monkeypatch.setattr(h, "QUOTA_TABLE_NAME", table_name)
+    monkeypatch.setattr(h, "DAILY_DEVICE_LIMIT", daily_device_limit)
+
+
+def _function_url_event(body: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "body": json.dumps(body),
+        "requestContext": {
+            "http": {
+                "sourceIp": "203.0.113.10",
+            }
+        },
+    }
+
+
 # ── _add_border ───────────────────────────────────────────────────────────────
 
 def test_add_border_increases_opaque_pixel_count() -> None:
@@ -195,6 +229,143 @@ def test_handler_happy_path() -> None:
 
     # Verify the sticker was actually written to S3
     s3.head_object(Bucket="test-bucket", Key=body["output_key"])
+
+
+@mock_aws
+def test_presign_upload_reserves_generation_quota(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Presigning an upload reserves one generation and reports remaining quota."""
+    import handler as h  # noqa: PLC0415
+
+    _configure_quota(monkeypatch, h)
+
+    event = _function_url_event(
+        {
+            "action": "presign_upload",
+            "object_key": "uploads/quota-test.jpg",
+            "device_id": "device-12345",
+        }
+    )
+    response = h.handler(event, {})
+
+    assert response["statusCode"] == 200
+    body = json.loads(response["body"])
+    assert "upload_url" in body
+    assert body["remaining_today"] == 4
+    assert "reset_at" in body
+
+
+@mock_aws
+def test_presign_upload_returns_429_after_daily_device_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A device cannot reserve more generations than its daily limit."""
+    import handler as h  # noqa: PLC0415
+
+    _configure_quota(monkeypatch, h, daily_device_limit=1)
+
+    first = h.handler(
+        _function_url_event(
+            {
+                "action": "presign_upload",
+                "object_key": "uploads/first.jpg",
+                "device_id": "device-12345",
+            }
+        ),
+        {},
+    )
+    second = h.handler(
+        _function_url_event(
+            {
+                "action": "presign_upload",
+                "object_key": "uploads/second.jpg",
+                "device_id": "device-12345",
+            }
+        ),
+        {},
+    )
+
+    assert first["statusCode"] == 200
+    assert second["statusCode"] == 429
+    body = json.loads(second["body"])
+    assert body["remaining_today"] == 0
+    assert "reset_at" in body
+
+
+@mock_aws
+def test_processing_requires_reserved_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Direct processing calls are blocked before S3 download or REMBG work."""
+    import handler as h  # noqa: PLC0415
+
+    _configure_quota(monkeypatch, h)
+
+    response = h.handler(
+        _function_url_event(
+            {
+                "object_key": "uploads/not-reserved.jpg",
+                "device_id": "device-12345",
+            }
+        ),
+        {},
+    )
+
+    assert response["statusCode"] == 400
+    assert "not reserved" in json.loads(response["body"])["error"]
+
+
+@mock_aws
+def test_handler_happy_path_with_reserved_quota(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A request reserved during presign can be consumed by processing."""
+    import handler as h  # noqa: PLC0415
+
+    _configure_quota(monkeypatch, h)
+    s3 = boto3.client("s3", region_name="ap-southeast-1")
+    monkeypatch.setattr(h, "_S3", s3)
+    s3.create_bucket(
+        Bucket="test-bucket",
+        CreateBucketConfiguration={"LocationConstraint": "ap-southeast-1"},
+    )
+
+    object_key = "uploads/reserved-image.jpg"
+    presign = h.handler(
+        _function_url_event(
+            {
+                "action": "presign_upload",
+                "object_key": object_key,
+                "device_id": "device-12345",
+            }
+        ),
+        {},
+    )
+    assert presign["statusCode"] == 200
+
+    s3.put_object(
+        Bucket="test-bucket",
+        Key=object_key,
+        Body=_make_rgb_image(),
+        ContentType="image/jpeg",
+    )
+
+    with patch("handler.remove", return_value=_make_rgba_png()):
+        response = h.handler(
+            _function_url_event(
+                {
+                    "object_key": object_key,
+                    "device_id": "device-12345",
+                }
+            ),
+            {},
+        )
+
+    assert response["statusCode"] == 200
+    body = json.loads(response["body"])
+    assert body["remaining_today"] == 4
+    assert body["output_key"] == "outputs/reserved-image_sticker.png"
 
 
 @mock_aws

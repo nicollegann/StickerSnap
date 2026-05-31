@@ -158,10 +158,11 @@ The stack creates:
 - `ProcessingLambda`: production Docker Lambda
 - `ProcessingDevLambda`: development Docker Lambda
 - Two public Lambda Function URLs, one for each Lambda
+- `QuotaTable`: DynamoDB table for anonymous device/IP quota counters and upload reservations
 - `FrontendBucket`: private bucket for the built React app
 - `FrontendDistribution`: CloudFront distribution with S3 Origin Access Control
 - GitHub Actions OIDC provider and deploy role
-- CloudFormation outputs for bucket names, Lambda URLs, Lambda names, CloudFront domain, distribution ID, and deploy role ARN
+- CloudFormation outputs for bucket names, quota table name, Lambda URLs, Lambda names, CloudFront domain, distribution ID, and deploy role ARN
 
 Build the frontend with the Lambda URL you want to use, from the project root:
 
@@ -199,19 +200,24 @@ Frontend:
 
 Lambda:
 
-| Variable                       | Default                 | Description                                             |
-| ------------------------------ | ----------------------- | ------------------------------------------------------- |
-| `BUCKET_NAME`                  | required                | Assets bucket containing both `uploads/` and `outputs/` |
-| `UPLOADS_PREFIX`               | `uploads/`              | Accepted upload key prefix                              |
-| `OUTPUTS_PREFIX`               | `outputs/`              | Generated sticker key prefix                            |
-| `PRESIGNED_URL_EXPIRY_SECONDS` | `3600`                  | Presigned output download URL lifetime                  |
-| `BORDER_SIZE_PX`               | `12`                    | White sticker border size                               |
-| `MAX_IMAGE_DIMENSION_PX`       | `1024`                  | Lambda-side longest-edge resize cap                     |
-| `ALLOWED_ORIGIN`               | `http://localhost:5173` | Used by the handler's manual `OPTIONS` response         |
-| `NUMBA_CACHE_DIR`              | `/tmp/numba_cache`      | Writable cache location for Lambda                      |
-| `U2NET_HOME`                   | `/tmp/u2net`            | REMBG model cache location                              |
-| `XDG_CACHE_HOME`               | `/tmp/cache`            | General cache location                                  |
-| `HOME`                         | `/tmp`                  | Avoids writes to Lambda's read-only home directory      |
+| Variable                       | Default                 | Description                                                                       |
+| ------------------------------ | ----------------------- | --------------------------------------------------------------------------------- |
+| `BUCKET_NAME`                  | required                | Assets bucket containing both `uploads/` and `outputs/`                           |
+| `UPLOADS_PREFIX`               | `uploads/`              | Accepted upload key prefix                                                        |
+| `OUTPUTS_PREFIX`               | `outputs/`              | Generated sticker key prefix                                                      |
+| `PRESIGNED_URL_EXPIRY_SECONDS` | `3600`                  | Presigned output download URL lifetime                                            |
+| `BORDER_SIZE_PX`               | `12`                    | White sticker border size                                                         |
+| `MAX_IMAGE_DIMENSION_PX`       | `1024`                  | Lambda-side longest-edge resize cap                                               |
+| `ALLOWED_ORIGIN`               | `http://localhost:5173` | Used by the handler's manual `OPTIONS` response                                   |
+| `QUOTA_TABLE_NAME`             | unset                   | DynamoDB quota table name. If unset, quota enforcement is disabled for local runs |
+| `QUOTA_NAMESPACE`              | `default`               | Prefix for quota records, set to `dev`/`prod` by CDK                              |
+| `DAILY_DEVICE_LIMIT`           | `2`                     | Sticker reservations allowed per device per UTC day                               |
+| `DAILY_IP_LIMIT`               | `3`                     | Sticker reservations allowed per IP per UTC day                                   |
+| `HOURLY_IP_LIMIT`              | `2`                     | Sticker reservations allowed per IP per UTC hour                                  |
+| `NUMBA_CACHE_DIR`              | `/tmp/numba_cache`      | Writable cache location for Lambda                                                |
+| `U2NET_HOME`                   | `/tmp/u2net`            | REMBG model cache location                                                        |
+| `XDG_CACHE_HOME`               | `/tmp/cache`            | General cache location                                                            |
+| `HOME`                         | `/tmp`                  | Avoids writes to Lambda's read-only home directory                                |
 
 ## Testing
 

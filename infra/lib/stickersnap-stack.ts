@@ -2,6 +2,7 @@ import * as cdk from "aws-cdk-lib";
 import * as s3 from "aws-cdk-lib/aws-s3";
 import * as lambda from "aws-cdk-lib/aws-lambda";
 import * as iam from "aws-cdk-lib/aws-iam";
+import * as dynamodb from "aws-cdk-lib/aws-dynamodb";
 import * as cloudfront from "aws-cdk-lib/aws-cloudfront";
 import * as origins from "aws-cdk-lib/aws-cloudfront-origins";
 import * as ecr_assets from "aws-cdk-lib/aws-ecr-assets";
@@ -83,6 +84,21 @@ export class StickerSnapStack extends cdk.Stack {
     });
 
     // ─────────────────────────────────────────────
+    // DynamoDB quota table — tracks daily/hourly anonymous usage and upload
+    // reservations. TTL removes old counters/reservations automatically.
+    // ─────────────────────────────────────────────
+    const quotaTable = new dynamodb.Table(this, "QuotaTable", {
+      partitionKey: {
+        name: "quota_key",
+        type: dynamodb.AttributeType.STRING,
+      },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      timeToLiveAttribute: "ttl",
+      encryption: dynamodb.TableEncryption.AWS_MANAGED,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+    });
+
+    // ─────────────────────────────────────────────
     // Docker image for Lambda — built from /lambda/Dockerfile.
     // CDK builds and pushes the image to ECR automatically during `cdk deploy`.
     // The REMBG model (~500 MB) is baked into the image at build time so Lambda
@@ -124,6 +140,11 @@ export class StickerSnapStack extends cdk.Stack {
           PRESIGNED_URL_EXPIRY_SECONDS: "3600",
           BORDER_SIZE_PX: "12",
           MAX_IMAGE_DIMENSION_PX: "1024",
+          QUOTA_TABLE_NAME: quotaTable.tableName,
+          QUOTA_NAMESPACE: "dev",
+          DAILY_DEVICE_LIMIT: "2",
+          DAILY_IP_LIMIT: "3",
+          HOURLY_IP_LIMIT: "2",
           NUMBA_CACHE_DIR: "/tmp/numba_cache",
           NUMBA_DISABLE_JIT: "0",
           // Redirect all model/cache dirs to /tmp — the only writable dir in Lambda
@@ -157,6 +178,11 @@ export class StickerSnapStack extends cdk.Stack {
           PRESIGNED_URL_EXPIRY_SECONDS: "3600",
           BORDER_SIZE_PX: "12",
           MAX_IMAGE_DIMENSION_PX: "1024",
+          QUOTA_TABLE_NAME: quotaTable.tableName,
+          QUOTA_NAMESPACE: "prod",
+          DAILY_DEVICE_LIMIT: "2",
+          DAILY_IP_LIMIT: "3",
+          HOURLY_IP_LIMIT: "2",
           NUMBA_CACHE_DIR: "/tmp/numba_cache",
           NUMBA_DISABLE_JIT: "0",
           // Redirect all model/cache dirs to /tmp — the only writable dir in Lambda
@@ -184,6 +210,8 @@ export class StickerSnapStack extends cdk.Stack {
     assetsBucket.grantPut(processingLambda, "uploads/*"); // for presigned PUT URLs
     assetsBucket.grantRead(processingLambda, "uploads/*"); // for downloading to process
     assetsBucket.grantPut(processingLambda, "outputs/*"); // for processed sticker
+    quotaTable.grantReadWriteData(processingDevLambda);
+    quotaTable.grantReadWriteData(processingLambda);
 
     // Also allow Lambda to generate presigned GET URLs for outputs/
     processingDevLambda.addToRolePolicy(
@@ -366,6 +394,12 @@ export class StickerSnapStack extends cdk.Stack {
       value: frontendBucket.bucketName,
       description: "S3 bucket for the React frontend",
       exportName: "StickerSnapFrontendBucketName",
+    });
+
+    new cdk.CfnOutput(this, "QuotaTableName", {
+      value: quotaTable.tableName,
+      description: "DynamoDB table for anonymous sticker quota counters",
+      exportName: "StickerSnapQuotaTableName",
     });
 
     new cdk.CfnOutput(this, "LambdaDevFunctionUrl", {
