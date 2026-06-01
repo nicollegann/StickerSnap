@@ -43,7 +43,7 @@ os.makedirs("/tmp/cache", exist_ok=True)
 _PYMATTING_SRC = "/var/task/pymatting"
 _PYMATTING_DST = "/tmp/pymatting"
 
-if not os.path.exists(_PYMATTING_DST):
+if os.path.exists(_PYMATTING_SRC) and not os.path.exists(_PYMATTING_DST):
     shutil.copytree(_PYMATTING_SRC, _PYMATTING_DST)
 
 if _PYMATTING_DST not in sys.path:
