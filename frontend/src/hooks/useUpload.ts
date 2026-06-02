@@ -66,6 +66,12 @@ export function useUpload() {
         }),
       });
 
+      if (presignRes.status === 429) {
+        throw new Error(
+          "Sticker generation is temporarily unavailable. Please check back soon.",
+        );
+      }
+
       if (!presignRes.ok) {
         const err = await readLambdaPayload(presignRes);
         throw new Error(
@@ -94,6 +100,11 @@ export function useUpload() {
       });
 
       if (!processRes.ok) {
+        if (processRes.status === 429) {
+          throw new Error(
+            "Sticker generation is temporarily unavailable. Please check back soon.",
+          );
+        }
         const err = await readLambdaPayload(processRes);
         throw new Error(
           formatUploadError(err, "Processing failed. Please try again."),
