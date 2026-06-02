@@ -7,6 +7,7 @@ import {
 
 const LAMBDA_URL = import.meta.env.VITE_LAMBDA_URL as string;
 const DEVICE_ID_STORAGE_KEY = "stickersnap_device_id";
+const BACKEND_ENABLED = import.meta.env.VITE_BACKEND_ENABLED === "true";
 
 type QuotaMetadata = {
   remainingToday?: number;
@@ -30,6 +31,16 @@ export function useUpload() {
     const validation = validateImageFile(file);
     if (!validation.valid) {
       setState({ status: "error", message: validation.error! });
+      return;
+    }
+
+    // 1.1 Kill switch to disable uploads if backend is down or under heavy load
+    if (!BACKEND_ENABLED) {
+      setState({
+        status: "error",
+        message:
+          "Sticker generation is temporarily unavailable. Please check back soon.",
+      });
       return;
     }
 
