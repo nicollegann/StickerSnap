@@ -7,7 +7,10 @@ import {
 
 const LAMBDA_URL = import.meta.env.VITE_LAMBDA_URL as string;
 const DEVICE_ID_STORAGE_KEY = "stickersnap_device_id";
+
 const BACKEND_ENABLED = import.meta.env.VITE_BACKEND_ENABLED === "true";
+const BACKEND_DISABLED_MESSAGE =
+  "Sticker generation is temporarily unavailable. Drop me a message if you'd like to give it a try!";
 
 type QuotaMetadata = {
   remainingToday?: number;
@@ -38,8 +41,7 @@ export function useUpload() {
     if (!BACKEND_ENABLED) {
       setState({
         status: "error",
-        message:
-          "Sticker generation is temporarily unavailable. Please check back soon.",
+        message: BACKEND_DISABLED_MESSAGE,
       });
       return;
     }
@@ -67,9 +69,7 @@ export function useUpload() {
       });
 
       if (presignRes.status === 429) {
-        throw new Error(
-          "Sticker generation is temporarily unavailable. Please check back soon.",
-        );
+        throw new Error(BACKEND_DISABLED_MESSAGE);
       }
 
       if (!presignRes.ok) {
@@ -101,9 +101,7 @@ export function useUpload() {
 
       if (!processRes.ok) {
         if (processRes.status === 429) {
-          throw new Error(
-            "Sticker generation is temporarily unavailable. Please check back soon.",
-          );
+          throw new Error(BACKEND_DISABLED_MESSAGE);
         }
         const err = await readLambdaPayload(processRes);
         throw new Error(
