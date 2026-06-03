@@ -3,8 +3,6 @@ import * as s3 from "aws-cdk-lib/aws-s3";
 import * as lambda from "aws-cdk-lib/aws-lambda";
 import * as iam from "aws-cdk-lib/aws-iam";
 import * as dynamodb from "aws-cdk-lib/aws-dynamodb";
-import * as cloudfront from "aws-cdk-lib/aws-cloudfront";
-import * as origins from "aws-cdk-lib/aws-cloudfront-origins";
 import * as ecr_assets from "aws-cdk-lib/aws-ecr-assets";
 import { Construct } from "constructs";
 import * as path from "path";
@@ -39,7 +37,7 @@ export class StickerSnapStack extends cdk.Stack {
       ],
       cors: [
         {
-          allowedOrigins: ["*"], // Restrict to CloudFront domain in production
+          allowedOrigins: ["*"], // Restrict to Vercel domain in production
           allowedMethods: [
             s3.HttpMethods.GET,
             s3.HttpMethods.PUT,
@@ -71,7 +69,7 @@ export class StickerSnapStack extends cdk.Stack {
       ],
       cors: [
         {
-          allowedOrigins: ["*"], // Restrict to CloudFront domain in production
+          allowedOrigins: ["*"], // Restrict to Vercel preview domain in production
           allowedMethods: [
             s3.HttpMethods.GET,
             s3.HttpMethods.PUT,
@@ -155,9 +153,6 @@ export class StickerSnapStack extends cdk.Stack {
         // Hard cap: max 10 concurrent executions at any time
         // leaves 10+ unreserved for other functions
         // reservedConcurrentExecutions: 10,
-        // Reserve one warm instance to eliminate cold starts for the first
-        // user after a quiet period. Costs ~$3/month — remove if budget is
-        // tight and you're happy to show a loading animation instead.
       },
     );
 
@@ -193,9 +188,6 @@ export class StickerSnapStack extends cdk.Stack {
         // Hard cap: max 10 concurrent executions at any time
         // leaves 10+ unreserved for other functions
         // reservedConcurrentExecutions: 10,
-        // Reserve one warm instance to eliminate cold starts for the first
-        // user after a quiet period. Costs ~$3/month — remove if budget is
-        // tight and you're happy to show a loading animation instead.
       },
     );
 
@@ -231,12 +223,12 @@ export class StickerSnapStack extends cdk.Stack {
     // ─────────────────────────────────────────────
     // Lambda Function URL — exposes Lambda over HTTPS without needing API
     // Gateway. CORS is configured to allow requests from any origin during
-    // development; restrict to the CloudFront domain in production.
+    // development; restrict to the Vercel domain in production.
     // ─────────────────────────────────────────────
     const lambdaDevUrl = processingDevLambda.addFunctionUrl({
       authType: lambda.FunctionUrlAuthType.NONE, // Public endpoint
       cors: {
-        allowedOrigins: ["*"], // TODO: lock to CloudFront domain post-launch
+        allowedOrigins: ["*"], // TODO: lock to Vercel preview domain post-launch
         allowedHeaders: ["content-type"],
         allowedMethods: [lambda.HttpMethod.POST],
         maxAge: cdk.Duration.seconds(300),
@@ -246,62 +238,14 @@ export class StickerSnapStack extends cdk.Stack {
     const lambdaUrl = processingLambda.addFunctionUrl({
       authType: lambda.FunctionUrlAuthType.NONE, // Public endpoint
       cors: {
-        allowedOrigins: ["*"], // TODO: lock to CloudFront domain post-launch
+        allowedOrigins: ["*"], // TODO: lock to Vercel production domain post-launch
         allowedHeaders: ["content-type"],
         allowedMethods: [lambda.HttpMethod.POST],
         maxAge: cdk.Duration.seconds(300),
       },
     });
 
-    // ─────────────────────────────────────────────
-    // Frontend S3 bucket — stores the built Vite/React app.
-    // Only CloudFront (via OAC) can read from it; direct S3 access is denied.
-    // ─────────────────────────────────────────────
-    const frontendBucket = new s3.Bucket(this, "FrontendBucket", {
-      bucketName: `stickersnap-frontend-${this.account}-${this.region}`,
-      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
-      encryption: s3.BucketEncryption.S3_MANAGED,
-      enforceSSL: true,
-      removalPolicy: cdk.RemovalPolicy.RETAIN,
-    });
-
-    // ─────────────────────────────────────────────
-    // CloudFront distribution — CDN that serves the React PWA globally.
-    // Uses Origin Access Control (OAC) so S3 bucket stays private.
-    // The SPA rewrite rule (403/404 → /index.html) is essential for
-    // client-side routing to work on direct URL loads or refreshes.
-    // ─────────────────────────────────────────────
-    const distribution = new cloudfront.Distribution(
-      this,
-      "FrontendDistribution",
-      {
-        defaultBehavior: {
-          origin:
-            origins.S3BucketOrigin.withOriginAccessControl(frontendBucket),
-          viewerProtocolPolicy:
-            cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
-          cachePolicy: cloudfront.CachePolicy.CACHING_OPTIMIZED,
-          compress: true,
-        },
-        defaultRootObject: "index.html",
-        errorResponses: [
-          // SPA fallback — let React Router handle 404s client-side
-          {
-            httpStatus: 403,
-            responseHttpStatus: 200,
-            responsePagePath: "/index.html",
-            ttl: cdk.Duration.seconds(0),
-          },
-          {
-            httpStatus: 404,
-            responseHttpStatus: 200,
-            responsePagePath: "/index.html",
-            ttl: cdk.Duration.seconds(0),
-          },
-        ],
-        comment: "StickerSnap frontend CDN",
-      },
-    );
+    // Frontend is deployed via Vercel — no S3 bucket or CloudFront needed.
 
     // ─────────────────────────────────────────────
     // IAM role for GitHub Actions CI/CD.
@@ -309,10 +253,10 @@ export class StickerSnapStack extends cdk.Stack {
     // Permissions are intentionally narrow:
     //   - ECR: push images (for Lambda deploys)
     //   - Lambda: update function code
-    //   - S3: sync built frontend files
-    //   - CloudFront: create cache invalidations
     //
-    // SETUP REQUIRED: Replace GITHUB_ORG and GITHUB_REPO below, then run
+    // Frontend is deployed via Vercel — no S3/CloudFront permissions needed.
+    //
+    // SETUP REQUIRED: Replace YOUR_GITHUB_ORG below, then run
     //   `cdk deploy` once to create the role. Copy the output RoleArn into
     //   your GitHub repo's Settings → Secrets as AWS_DEPLOY_ROLE_ARN.
     // ─────────────────────────────────────────────
@@ -331,9 +275,8 @@ export class StickerSnapStack extends cdk.Stack {
         githubOidcProvider.openIdConnectProviderArn,
         {
           StringLike: {
-            // Replace with your GitHub org/repo
             "token.actions.githubusercontent.com:sub":
-              "repo:YOUR_GITHUB_ORG/stickersnap:*",
+              "repo:nicollegann/stickersnap:*",
           },
           StringEquals: {
             "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
@@ -363,17 +306,6 @@ export class StickerSnapStack extends cdk.Stack {
       }),
     );
 
-    // S3 + CloudFront — deploy frontend
-    frontendBucket.grantReadWrite(githubActionsRole);
-    githubActionsRole.addToPolicy(
-      new iam.PolicyStatement({
-        actions: ["cloudfront:CreateInvalidation"],
-        resources: [
-          `arn:aws:cloudfront::${this.account}:distribution/${distribution.distributionId}`,
-        ],
-      }),
-    );
-
     // ─────────────────────────────────────────────
     // Stack outputs — printed after `cdk deploy` and stored in SSM-style
     // so GitHub Actions workflows can read them without hardcoding.
@@ -388,12 +320,6 @@ export class StickerSnapStack extends cdk.Stack {
       value: assetsBucketDev.bucketName,
       description: "S3 bucket for uploads and processed stickers (dev)",
       exportName: "StickerSnapAssetsBucketNameDev",
-    });
-
-    new cdk.CfnOutput(this, "FrontendBucketName", {
-      value: frontendBucket.bucketName,
-      description: "S3 bucket for the React frontend",
-      exportName: "StickerSnapFrontendBucketName",
     });
 
     new cdk.CfnOutput(this, "QuotaTableName", {
@@ -413,20 +339,6 @@ export class StickerSnapStack extends cdk.Stack {
       value: lambdaUrl.url,
       description: "Lambda Function URL — POST endpoint for sticker processing",
       exportName: "StickerSnapLambdaFunctionUrl",
-    });
-
-    new cdk.CfnOutput(this, "CloudFrontDomain", {
-      value: distribution.distributionDomainName,
-      description:
-        "CloudFront domain for the frontend (add CNAME for custom domain)",
-      exportName: "StickerSnapCloudFrontDomain",
-    });
-
-    new cdk.CfnOutput(this, "CloudFrontDistributionId", {
-      value: distribution.distributionId,
-      description:
-        "CloudFront distribution ID — used by CI/CD for cache invalidation",
-      exportName: "StickerSnapCloudFrontDistributionId",
     });
 
     new cdk.CfnOutput(this, "GitHubActionsRoleArn", {
