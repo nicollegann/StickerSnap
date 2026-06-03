@@ -2,7 +2,7 @@
 
 > Turn any photo into a clean PNG sticker — right from your phone.
 
-StickerSnap is a mobile-first Progressive Web App (PWA) that lets a user pick a photo, automatically removes the background, adds a white border, and produces a ready-to-share sticker PNG — all in a few seconds. It is built on a serverless AWS backend with a Vite + React 18 frontend, deployed and managed entirely through AWS CDK.
+StickerSnap is a mobile-first Progressive Web App (PWA) that lets a user pick a photo, automatically removes the background, adds a white border, and produces a ready-to-share sticker PNG — all in a few seconds. It is built on a serverless AWS backend with a Vite + React 18 frontend deployed on Vercel, with infrastructure managed through AWS CDK.
 
 **Live demo:** _deploy your own with the commands in [AWS Deployment](#aws-deployment)_
 
@@ -46,9 +46,17 @@ StickerSnap is a mobile-first Progressive Web App (PWA) that lets a user pick a 
     - [Deploy](#deploy)
     - [Build and deploy the frontend](#build-and-deploy-the-frontend)
     - [Branching and production deployments](#branching-and-production-deployments)
+  - [CI/CD](#cicd)
+    - [Continuous Integration](#continuous-integration)
+    - [Continuous Deployment / Delivery](#continuous-deployment--delivery)
+    - [GitHub Actions secrets setup](#github-actions-secrets-setup)
   - [Useful commands reference](#useful-commands-reference)
   - [CORS notes](#cors-notes)
   - [Testing](#testing)
+    - [Backend (Python / pytest)](#backend-python--pytest)
+    - [Frontend (Node / Vitest)](#frontend-node--vitest)
+    - [Infrastructure (CDK synth)](#infrastructure-cdk-synth)
+    - [CI thresholds](#ci-thresholds)
   - [Sensitive information checklist](#sensitive-information-checklist)
 
 ---
@@ -96,34 +104,31 @@ Browser PWA  →  save / copy / share
                         ┌───────────────────────────────────┐
                         │          AWS (ap-southeast-1)     │
                         │                                   │
-  Browser PWA  ◄──────► │  CloudFront  ──►  FrontendBucket  │
-  (React + Vite)        │      │                            │
-                        │      ▼                            │
-                        │  Lambda Function URL (prod / dev) │
-                        │      │              │             │
-                        │      ▼              ▼             │
+  Browser PWA  ◄──────► │  Lambda Function URL (prod / dev) │
+  (React + Vite)        │      │              │             │
+  hosted on Vercel      │      ▼              ▼             │
                         │  S3 AssetsBucket  DynamoDB        │
                         │  (uploads/ +      QuotaTable      │
                         │   outputs/)                       │
                         └───────────────────────────────────┘
 
-  GitHub Actions  ──OIDC──►  IAM Deploy Role  ──►  CDK deploy
+  GitHub Actions  ──OIDC──►  IAM Deploy Role  ──►  ECR + Lambda update
 ```
 
 **AWS resources created by CDK:**
 
-| Resource               | Name pattern                                | Purpose                            |
-| ---------------------- | ------------------------------------------- | ---------------------------------- |
-| `AssetsBucket`         | `stickersnap-assets-{account}-{region}`     | Prod image store                   |
-| `AssetsBucketDev`      | `stickersnap-assets-dev-{account}-{region}` | Dev image store                    |
-| `ProcessingLambda`     | Docker Lambda                               | Prod background removal            |
-| `ProcessingDevLambda`  | Docker Lambda                               | Dev background removal             |
-| `QuotaTable`           | DynamoDB                                    | Per-device / per-IP quota counters |
-| `FrontendBucket`       | Private S3                                  | Built React app                    |
-| `FrontendDistribution` | CloudFront + OAC                            | CDN for the PWA                    |
-| GitHub OIDC role       | `GitHubActionsDeployRole`                   | Keyless CI/CD                      |
+| Resource              | Name pattern                                | Purpose                            |
+| --------------------- | ------------------------------------------- | ---------------------------------- |
+| `AssetsBucket`        | `stickersnap-assets-{account}-{region}`     | Prod image store                   |
+| `AssetsBucketDev`     | `stickersnap-assets-dev-{account}-{region}` | Dev image store                    |
+| `ProcessingLambda`    | Docker Lambda                               | Prod background removal            |
+| `ProcessingDevLambda` | Docker Lambda                               | Dev background removal             |
+| `QuotaTable`          | DynamoDB                                    | Per-device / per-IP quota counters |
+| GitHub OIDC role      | `StickerSnapGitHubActionsRole`              | Keyless CI/CD                      |
 
 Both S3 buckets have a **1-day lifecycle rule** on `uploads/` and `outputs/` to keep storage costs near zero.
+
+The frontend is hosted entirely on **Vercel** — no S3 bucket or CloudFront distribution is provisioned by CDK.
 
 ### Why these choices?
 
@@ -134,6 +139,7 @@ Both S3 buckets have a **1-day lifecycle rule** on `uploads/` and `outputs/` to 
 | Docker Lambda instead of a zip deployment  | rembg + PyTorch/ONNX + NumPy exceed the 250 MB zip limit; Docker images up to 10 GB are supported           |
 | DynamoDB for quota                         | Serverless, no idle cost, atomic conditional writes make per-device counter updates race-condition safe     |
 | CDK (TypeScript) for infrastructure        | Typed, testable, version-controlled infra; `cdk diff` makes change reviews easy before every deploy         |
+| Vercel for frontend hosting                | Zero-config deployments, automatic preview URLs per branch, and no S3/CloudFront setup required             |
 | Region `ap-southeast-1`                    | Singapore; lowest latency for the target user base                                                          |
 
 ---
@@ -144,6 +150,10 @@ Both S3 buckets have a **1-day lifecycle rule** on `uploads/` and `outputs/` to 
 .
 ├── docker-compose.yml              # Run the Lambda container locally
 ├── .env.example                    # Root env template for local Lambda
+├── .github/
+│   └── workflows/
+│       ├── ci.yml                  # Run backend (pytest) and frontend (vitest) tests
+│       └── deploy.yml              # Build Docker image, deploy dev/prod Lambda
 ├── frontend/
 │   ├── src/
 │   │   ├── components/             # UploadScreen, ProcessingScreen,
@@ -335,16 +345,15 @@ CDK builds the Docker image, pushes it to ECR, and creates or updates all resour
 
 ### Build and deploy the frontend
 
+The frontend is deployed automatically by Vercel on every push to the `production` branch. For a manual local build:
+
 ```bash
 cd frontend
 echo "VITE_LAMBDA_URL=<LambdaFunctionUrl from CDK output>" > .env.production
 npm run build
-
-aws s3 sync dist/ s3://<FrontendBucketName> --delete
-aws cloudfront create-invalidation \
-  --distribution-id <CloudFrontDistributionId> \
-  --paths "/*"
 ```
+
+Set `VITE_LAMBDA_URL` in your Vercel project's environment variables so production builds pick up the correct Lambda URL without a local `.env.production` file.
 
 ### Branching and production deployments
 
@@ -368,24 +377,97 @@ feature/* → main → production → Vercel Production Deployment
 
 ---
 
+## CI/CD
+
+This project uses two GitHub Actions workflows for automated testing and AWS backend deployment. The frontend is handled entirely by Vercel's GitHub integration and is not part of these workflows.
+
+### Continuous Integration
+
+**Workflow:** `.github/workflows/ci.yml`  
+**Triggers:** every push and pull request to `main` or `production`
+
+Two jobs run in parallel:
+
+**`backend` — Python tests (pytest)**
+
+Runs inside the `lambda/` directory against Python 3.11. Installs runtime deps from `requirements.txt` plus test deps from `requirements-test.txt`, then runs:
+
+```bash
+pytest tests/ -v --tb=short --cov=handler --cov-fail-under=80
+```
+
+Coverage must reach **80%** for the job to pass. A coverage XML report is uploaded as an artifact (`backend-coverage`, retained for 14 days).
+
+**`frontend` — Node tests (Vitest)**
+
+Runs inside the `frontend/` directory against Node 24. After `npm ci` and an optional type-check (`npm run typecheck`), it runs:
+
+```bash
+npm test -- --reporter=verbose --coverage --coverage.thresholds.lines=30
+```
+
+Line coverage must reach **30%** for the job to pass. An lcov report is uploaded as an artifact (`frontend-coverage`, retained for 14 days).
+
+A final `all-checks-pass` job acts as a single status check that branch protection rules can key off — the PR cannot be merged unless both `backend` and `frontend` succeed.
+
+In-flight runs for the same branch are cancelled automatically when a new push arrives.
+
+### Continuous Deployment / Delivery
+
+**Workflow:** `.github/workflows/deploy.yml`  
+**Triggers:** on successful completion of the CI workflow for `main` or `production`
+
+Authentication to AWS uses OIDC — no long-lived credentials are stored in GitHub.
+
+**Shared step — `build-image`**
+
+Runs for both branches. Builds the Lambda Docker image for `linux/amd64`, tags it with the commit SHA and `latest`, and pushes both tags to ECR.
+
+**`deploy-dev` — Continuous Deployment (runs on `main`)**
+
+Automatically updates `ProcessingDevLambda` with the newly pushed image. No approval required — dev environment breakage is expected and easy to roll back.
+
+**`deploy-prod` — Continuous Delivery (runs on `production`)**
+
+Pauses at the `environment: production` gate and sends an approval request to configured reviewers. Once approved, `ProcessingLambda` is updated with the image that was already pushed to ECR. The actual Lambda update takes ~30 seconds after approval.
+
+```text
+push to main       → CI passes → build-image → deploy-dev   (automatic)
+push to production → CI passes → build-image → (approval)  → deploy-prod
+```
+
+### GitHub Actions secrets setup
+
+After running `cdk deploy` once, copy the CDK outputs into your repository's **Settings → Secrets and variables → Actions**:
+
+| Secret                      | CDK output                         |
+| --------------------------- | ---------------------------------- |
+| `AWS_DEPLOY_ROLE_ARN`       | `GitHubActionsRoleArn`             |
+| `AWS_REGION`                | e.g. `ap-southeast-1`              |
+| `ECR_REPOSITORY_URI`        | ECR repo URI (AWS Console or CDK)  |
+| `LAMBDA_DEV_FUNCTION_NAME`  | `StickerSnapDevLambdaFunctionName` |
+| `LAMBDA_PROD_FUNCTION_NAME` | `StickerSnapLambdaFunctionName`    |
+
+---
+
 ## Useful commands reference
 
-| Task                                   | Command                                                                  |
-| -------------------------------------- | ------------------------------------------------------------------------ |
-| **Start local Lambda**                 | `docker compose up --build` (from project root)                          |
-| **Stop local Lambda**                  | `docker compose down`                                                    |
-| **Start frontend dev server**          | `cd frontend && npm run dev`                                             |
-| **Type-check frontend**                | `cd frontend && npm run build`                                           |
-| **Run Lambda unit tests**              | `cd lambda && pytest tests/ -v --tb=short`                               |
-| **Synth CDK (preview CloudFormation)** | `cd infra && npm run synth`                                              |
-| **Diff CDK (preview changes)**         | `cd infra && cdk diff`                                                   |
-| **Deploy everything**                  | `cd infra && npm run deploy`                                             |
-| **Deploy frontend only**               | `aws s3 sync dist/ s3://<bucket> --delete`                               |
-| **Invalidate CloudFront cache**        | `aws cloudfront create-invalidation --distribution-id <id> --paths "/*"` |
-| **Enable kill switch (frontend)**      | Set `VITE_BACKEND_ENABLED=false` and rebuild                             |
-| **Enable kill switch (backend)**       | `./scripts/disable-backend.sh` in root folder                            |
-| **Disable quota (Lambda)**             | Unset `QUOTA_TABLE_NAME` env var on the Lambda function                  |
-| **Verify AWS identity**                | `aws sts get-caller-identity`                                            |
+| Task                                   | Command                                                 |
+| -------------------------------------- | ------------------------------------------------------- |
+| **Start local Lambda**                 | `docker compose up --build` (from project root)         |
+| **Stop local Lambda**                  | `docker compose down`                                   |
+| **Start frontend dev server**          | `cd frontend && npm run dev`                            |
+| **Type-check frontend**                | `cd frontend && npm run typecheck`                      |
+| **Run backend unit tests**             | `cd lambda && pytest tests/ -v --tb=short`              |
+| **Run frontend tests**                 | `cd frontend && npm test`                               |
+| **Run frontend tests with coverage**   | `cd frontend && npm test -- --coverage`                 |
+| **Synth CDK (preview CloudFormation)** | `cd infra && npm run synth`                             |
+| **Diff CDK (preview changes)**         | `cd infra && cdk diff`                                  |
+| **Deploy everything**                  | `cd infra && npm run deploy`                            |
+| **Enable kill switch (frontend)**      | Set `VITE_BACKEND_ENABLED=false` and rebuild            |
+| **Enable kill switch (backend)**       | `./scripts/disable-backend.sh` in root folder           |
+| **Disable quota (Lambda)**             | Unset `QUOTA_TABLE_NAME` env var on the Lambda function |
+| **Verify AWS identity**                | `aws sts get-caller-identity`                           |
 
 ---
 
@@ -393,12 +475,12 @@ feature/* → main → production → Vercel Production Deployment
 
 There are two independent CORS surfaces:
 
-**Lambda Function URL CORS** — configured in CDK for `POST` requests from the frontend origin. Currently set to `*` for development; tighten to your CloudFront domain before production launch.
+**Lambda Function URL CORS** — configured in CDK for `POST` requests from the frontend origin. Currently set to `*` for development; tighten to your Vercel domain before production launch.
 
 **S3 bucket CORS** — required for browser `PUT` uploads to presigned URLs and browser `GET` requests to fetch sticker output. Must include:
 
 - Local dev: origin `http://localhost:5173`, methods `GET PUT HEAD`
-- Production: your CloudFront origin or custom domain, same methods
+- Production: your Vercel domain, same methods
 
 These are two separate configurations. Missing either one produces browser CORS errors that look identical — check both when debugging.
 
@@ -406,19 +488,62 @@ These are two separate configurations. Missing either one produces browser CORS 
 
 ## Testing
 
+### Backend (Python / pytest)
+
 ```bash
-# Lambda unit tests
 cd lambda
+pip install -r requirements.txt -r requirements-test.txt
 pytest tests/ -v --tb=short
+```
 
-# Frontend type-check and build
+To run with coverage:
+
+```bash
+pytest tests/ -v --tb=short \
+  --cov=handler \
+  --cov-report=term-missing \
+  --cov-fail-under=80
+```
+
+Tests mock `rembg.remove` so the U2-Net model (~170 MB) is never downloaded locally. Set `NUMBA_DISABLE_JIT=1` to suppress Numba/LLVM noise in non-CI runs.
+
+### Frontend (Node / Vitest)
+
+```bash
 cd frontend
-npm run build
+npm ci
+npm test
+```
 
-# CDK synth (validates the CloudFormation template)
+To run with coverage:
+
+```bash
+npm test -- --coverage --coverage.reporter=text
+```
+
+An optional type-check step runs before tests in CI:
+
+```bash
+npm run typecheck
+```
+
+### Infrastructure (CDK synth)
+
+```bash
 cd infra
 npm run synth
 ```
+
+This synthesises the CloudFormation template and validates that all CDK constructs resolve without errors — a lightweight sanity check that does not require AWS credentials.
+
+### CI thresholds
+
+| Suite    | Tool   | Coverage threshold |
+| -------- | ------ | ------------------ |
+| Backend  | pytest | 80% (lines)        |
+| Frontend | Vitest | 30% (lines)        |
+
+Both thresholds are enforced in CI and will fail the build if not met.
 
 ---
 
@@ -430,7 +555,6 @@ npm run synth
 - `frontend/.env.local` (contains Lambda URLs)
 - Real AWS access keys, secret access keys, or session tokens
 - Real Lambda Function URLs (if this is a public repository)
-- Real CloudFront distribution IDs
 - `infra/cdk.out/` — synthesised templates contain account IDs, ARNs, and generated bucket names
 - `.DS_Store` files
 
@@ -441,5 +565,5 @@ npm run synth
 **To review:**
 
 - Bucket names include your AWS account ID at deploy time.
-- `GitHubActionsDeployRole` contains the placeholder `repo:YOUR_GITHUB_ORG/stickersnap:*` — replace with real GitHub owner and repo before using CI/CD.
-- Lambda Function URL and S3 bucket CORS are set to `*` in the current CDK code — restrict to deployed frontend origin before launch.
+- `StickerSnapGitHubActionsRole` is scoped to `repo:nicollegann/StickerSnap:*` — update the CDK stack if the repo is renamed or transferred.
+- Lambda Function URL and S3 bucket CORS are set to `*` in the current CDK code — restrict to your Vercel domain before launch.
