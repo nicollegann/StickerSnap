@@ -14,7 +14,7 @@ llvmlite==0.43.0
 networkx==3.6.1
 numba==0.60.0
 numpy==1.26.4
-onnxruntime>=1.17.0
+onnxruntime==1.16.3
 packaging==26.2
 pillow==12.2.0
 platformdirs==4.9.6
