@@ -48,7 +48,7 @@ jobs:
           python -m pip install --upgrade pip
           # Install the full runtime deps so handler.py can be imported,
           # plus test-only deps (moto, pytest-cov).
-          pip install -r requirements.txt -r requirements-dev.txt
+          pip install -r requirements.txt -r requirements-test.txt
 
       # rembg downloads a ~170 MB model on first run; we mock remove() in tests
       # so the model is never downloaded in CI — no extra step needed.
