@@ -276,7 +276,7 @@ export class StickerSnapStack extends cdk.Stack {
         {
           StringLike: {
             "token.actions.githubusercontent.com:sub":
-              "repo:nicollegann/stickersnap:*",
+              "repo:nicollegann/StickerSnap:*",
           },
           StringEquals: {
             "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
