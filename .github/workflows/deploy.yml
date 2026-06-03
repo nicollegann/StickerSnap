@@ -38,7 +38,7 @@ jobs:
     runs-on: ubuntu-latest
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
     outputs:
-      image-uri: ${{ steps.build.outputs.image-uri }}
+      image-tag: ${{ steps.build.outputs.image-tag }}
 
     steps:
       - name: Checkout
@@ -68,7 +68,7 @@ jobs:
             ./lambda
           docker push $ECR_URI:$IMAGE_TAG
           docker push $ECR_URI:latest
-          echo "image-uri=$ECR_URI:$IMAGE_TAG" >> $GITHUB_OUTPUT
+          echo "image-tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
 
   # ── Dev: auto-deploy (Continuous Deployment) ────────────────────────────────
   # Runs automatically on every develop push that passes CI.
@@ -91,7 +91,7 @@ jobs:
         run: |
           aws lambda update-function-code \
             --function-name ${{ secrets.LAMBDA_DEV_FUNCTION_NAME }} \
-            --image-uri ${{ needs.build-image.outputs.image-uri }}
+            --image-uri $ECR_URI:$IMAGE_TAG
 
       - name: Wait for update to complete
         run: |
@@ -121,7 +121,7 @@ jobs:
         run: |
           aws lambda update-function-code \
             --function-name ${{ secrets.LAMBDA_PROD_FUNCTION_NAME }} \
-            --image-uri ${{ needs.build-image.outputs.image-uri }}
+            --image-uri $ECR_URI:$IMAGE_TAG
 
       - name: Wait for update to complete
         run: |
