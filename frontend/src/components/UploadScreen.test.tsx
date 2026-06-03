@@ -16,7 +16,7 @@
 
 import { render, screen, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { UploadScreen } from "../components/UploadScreen";
 
 // ── Stub child components that have their own render concerns ─────────────────
@@ -49,7 +49,9 @@ describe("UploadScreen — rendering", () => {
 
   it("shows the tagline", () => {
     setup();
-    expect(screen.getByText(/turn any photo into a sticker/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/turn any photo into a sticker/i),
+    ).toBeInTheDocument();
   });
 
   it("shows the default dropzone label", () => {
@@ -136,7 +138,9 @@ describe("UploadScreen — drag and drop", () => {
     const { dropzone, onFile } = setup();
 
     fireEvent.drop(dropzone, {
-      dataTransfer: { files: [makeFile("spreadsheet.xlsx", "application/vnd.openxmlformats")] },
+      dataTransfer: {
+        files: [makeFile("spreadsheet.xlsx", "application/vnd.openxmlformats")],
+      },
     });
 
     expect(onFile).not.toHaveBeenCalled();
