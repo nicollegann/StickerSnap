@@ -88,6 +88,9 @@ jobs:
           aws-region: ${{ secrets.AWS_REGION }}
 
       - name: Update dev Lambda
+        env:
+          IMAGE_TAG: ${{ needs.build-image.outputs.image-tag }}
+          ECR_URI: ${{ secrets.ECR_REPOSITORY_URI }}
         run: |
           aws lambda update-function-code \
             --function-name ${{ secrets.LAMBDA_DEV_FUNCTION_NAME }} \
@@ -118,6 +121,9 @@ jobs:
           aws-region: ${{ secrets.AWS_REGION }}
 
       - name: Update prod Lambda
+        env:
+          IMAGE_TAG: ${{ needs.build-image.outputs.image-tag }}
+          ECR_URI: ${{ secrets.ECR_REPOSITORY_URI }}
         run: |
           aws lambda update-function-code \
             --function-name ${{ secrets.LAMBDA_PROD_FUNCTION_NAME }} \
