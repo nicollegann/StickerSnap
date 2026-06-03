@@ -5,7 +5,7 @@
 # Runs on every push and pull request.
 # Two parallel jobs:
 #   backend  — pytest on the Lambda handler (Python 3.11, moto, rembg mocked)
-#   frontend — vitest on the React app (Node 20, jsdom)
+#   frontend — vitest on the React app (Node 24, jsdom)
 #
 # Both jobs must pass before a PR can be merged (enforce via branch protection).
 
@@ -85,10 +85,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Node 20
+      - name: Set up Node 24
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "24"
           cache: npm
 
       - name: Install dependencies
