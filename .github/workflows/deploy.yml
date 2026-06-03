@@ -59,15 +59,16 @@ jobs:
         id: build
         env:
           IMAGE_TAG: ${{ github.event.workflow_run.head_sha }}
+          ECR_URI: ${{ secrets.ECR_REPOSITORY_URI }}
         run: |
           docker build \
             --platform linux/amd64 \
-            -t ${{ secrets.ECR_REPOSITORY_URI }}:$IMAGE_TAG \
-            -t ${{ secrets.ECR_REPOSITORY_URI }}:latest \
+            -t $ECR_URI:$IMAGE_TAG \
+            -t $ECR_URI:latest \
             ./lambda
-          docker push ${{ secrets.ECR_REPOSITORY_URI }}:$IMAGE_TAG
-          docker push ${{ secrets.ECR_REPOSITORY_URI }}:latest
-          echo "image-uri=${{ secrets.ECR_REPOSITORY_URI }}:$IMAGE_TAG" >> $GITHUB_OUTPUT
+          docker push $ECR_URI:$IMAGE_TAG
+          docker push $ECR_URI:latest
+          echo "image-uri=$ECR_URI:$IMAGE_TAG" >> $GITHUB_OUTPUT
 
   # ── Dev: auto-deploy (Continuous Deployment) ────────────────────────────────
   # Runs automatically on every develop push that passes CI.
