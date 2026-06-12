@@ -4,7 +4,7 @@
 
 StickerSnap is a mobile-first Progressive Web App (PWA) that lets a user pick a photo, automatically removes the background, adds a white border, and produces a ready-to-share sticker PNG — all in a few seconds. It is built on a serverless AWS backend with a Vite + React 18 frontend deployed on Vercel, with infrastructure managed through AWS CDK.
 
-**Live demo:** _deploy your own with the commands in [AWS Deployment](#aws-deployment)_
+**Live demo:** https://youtu.be/koUffXNqDVE
 
 **Live site:** https://sticker-snap.vercel.app/
 
