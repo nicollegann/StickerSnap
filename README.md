@@ -6,12 +6,6 @@ StickerSnap is a mobile-first Progressive Web App (PWA) that lets a user pick a 
 
 **Live demo:** https://youtu.be/koUffXNqDVE
 
-**Live site:** https://sticker-snap.vercel.app/
-
-> **Note:** The live site has a sticker generation limit of 2 stickers daily per device. If you see that generation is temporarily unavailable,
-> it is most likely that I have disabled the backend services to reduce incurring costs on AWS. Do reach out if you would like to try
-> the app!
-
 ---
 
 ## Table of Contents
